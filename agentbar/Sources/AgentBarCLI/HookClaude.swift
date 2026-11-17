@@ -28,11 +28,15 @@ enum ClaudeHook {
         }
 
         let input = FileHandle.standardInput.readDataToEndOfFile()
+        HookLog.write("claude IN \(String(decoding: input.prefix(4_000), as: UTF8.self))")
         guard let hook = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any],
               let name = hook["hook_event_name"] as? String else {
             warn("hook claude: expected Claude Code hook JSON on stdin")
             exit(0)
         }
+        // Cursor also runs Claude Code's hooks (with its own payloads). AgentBar's Cursor adapter
+        // handles Cursor, so ignore these here instead of showing the session twice.
+        if hook["cursor_version"] != nil { exit(0) }
         guard var event = makeEvent(name: name, hook: hook) else { exit(0) } // hook we don't map
 
         if name == "PermissionRequest" {

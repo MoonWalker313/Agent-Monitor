@@ -139,6 +139,7 @@ struct CueCard: View {
 @MainActor
 final class RequestPopupController {
     private var panel: NSPanel?
+    private var host: NSView?
 
     func update(model: AppModel, show: Bool) {
         if model.pendingRequests.isEmpty {
@@ -148,8 +149,13 @@ final class RequestPopupController {
         guard show || panel?.isVisible == true else { return }
         let panel = self.panel ?? makePanel(model: model)
         self.panel = panel
-        position(panel)
+        fit(panel)
         panel.orderFrontRegardless()
+        // SwiftUI applies the model change on the next pass; fit again once it has.
+        DispatchQueue.main.async { [weak self, weak panel] in
+            guard let self, let panel, panel.isVisible else { return }
+            self.fit(panel)
+        }
     }
 
     func close() {
@@ -171,21 +177,30 @@ final class RequestPopupController {
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.backgroundColor = NSColor(Theme.panel)
+        // No traffic lights: "Later" hides the popup, and it can't be minimised or zoomed.
+        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            panel.standardWindowButton(button)?.isHidden = true
+        }
         let host = NSHostingView(rootView: RequestPopupView(onClose: { [weak panel] in panel?.orderOut(nil) })
             .environmentObject(model))
-        host.sizingOptions = [.preferredContentSize]
         panel.contentView = host
+        self.host = host
         return panel
     }
 
-    /// Top-right of the screen with the mouse, just under the menu bar.
-    private func position(_ panel: NSPanel) {
+    /// Sizes the window to its content (never taller than the screen) and pins it to the
+    /// top-right of the screen with the mouse, just under the menu bar.
+    private func fit(_ panel: NSPanel) {
+        guard let host else { return }
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
         guard let visible = screen?.visibleFrame else { return }
-        panel.layoutIfNeeded()
-        let size = panel.frame.size
-        panel.setFrameOrigin(NSPoint(x: visible.maxX - size.width - 12, y: visible.maxY - size.height - 8))
+        host.layoutSubtreeIfNeeded()
+        let content = host.fittingSize
+        let height = min(content.height, visible.height - 24)
+        let frame = panel.frameRect(forContentRect: NSRect(x: 0, y: 0, width: content.width, height: height))
+        panel.setFrame(NSRect(x: visible.maxX - frame.width - 12, y: visible.maxY - frame.height - 8,
+                              width: frame.width, height: frame.height), display: true)
     }
 }
 
@@ -222,7 +237,7 @@ struct RequestPopupView: View {
             .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 14)
-        .padding(.top, 30) // the transparent title bar's close button sits here
+        .padding(.top, 18)
         .padding(.bottom, 14)
         .frame(width: 400)
         .background(Theme.panel)

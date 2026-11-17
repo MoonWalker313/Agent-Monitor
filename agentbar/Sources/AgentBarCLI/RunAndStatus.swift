@@ -163,7 +163,8 @@ enum StatusCommand {
     }
 
     static func agentName(_ agent: String) -> String {
-        agent.split(separator: "-").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+        Integration.allCases.first(where: { $0.agentID == agent })?.displayName
+            ?? agent.split(separator: "-").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
     }
 
     static func ago(_ date: Date) -> String {

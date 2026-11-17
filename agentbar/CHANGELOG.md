@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.1.0 (2026-11-17)
+
+**Cursor, Gemini CLI and Antigravity**, one click each in Settings → Agents (and the setup guide):
+
+| | Sessions and tasks | Knows it's waiting for you | Allow / Deny in AgentBar |
+|---|---|---|---|
+| Claude Code | ✅ | ✅ | ✅ |
+| Cursor | ✅ | — | ✅ terminal commands, opt-in |
+| Gemini CLI | ✅ | ✅ | — (you answer in Gemini) |
+| Antigravity | ✅ | — | ✅ terminal commands, opt-in |
+
+- Approvals for Cursor and Antigravity are off by default; turn on "Answer terminal commands here" per agent. If you don't answer within 60 seconds, the agent asks in its own window.
+- These hooks always reply, so a missing or closed AgentBar never lets a command run without the agent's usual prompt.
+- Connect and Disconnect change only AgentBar's hooks in each tool's settings file, keep a private backup, and never touch your other hooks.
+
+**Also in 1.1.0**
+- A permission request stays open while the agent reports other activity (Cursor reports a file edit in the same instant it asks to run a command, which used to close the card).
+- Requests show the agent's own plain-language description when it gives one ("Wants to list directory contents").
+- The popup sizes itself to its content, so the buttons are never cut off.
+- Notifications show AgentBar's icon on macOS 26 (the icon is now also in an asset catalog).
+- Cursor sessions are no longer reported twice (Cursor also runs Claude Code's hooks); Cursor reports your prompt and token usage.
+- New commands: `agentbar connect|disconnect <agent> [--approvals]`.
+- Troubleshooting: create `~/Library/Application Support/AgentBar/hook-debug` to log every hook call to `hook-debug.log` next to it; delete both when done (the log can contain your prompts).
+
 ## 1.0.1 (2026-11-17)
 
 Security fixes from a review of 1.0.0. Upgrading is recommended.

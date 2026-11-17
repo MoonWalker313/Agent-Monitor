@@ -290,8 +290,44 @@ final class AppModel: ObservableObject {
     func showSetupGuide() { setupGuide.show(model: self, settings: settings) }
 
     /// Claude Code is connected when its user settings run `agentbar hook claude`.
-    func refreshClaudeStatus() {
-        claudeConnected = (try? ClaudeSetup.isConnected(ClaudeSetup.read())) ?? false
+    func refreshClaudeStatus() { refreshIntegrations() }
+
+    @Published private(set) var connected: [Integration: Bool] = [:]
+    @Published private(set) var approvals: [Integration: Bool] = [:]
+
+    func refreshIntegrations() {
+        for i in Integration.allCases {
+            connected[i] = IntegrationSetup.isConnected(i)
+            approvals[i] = IntegrationSetup.approvalsOn(i)
+        }
+        claudeConnected = connected[.claude] ?? false
+    }
+
+    /// Adds AgentBar's hooks to the agent's user settings (backup kept; other settings untouched).
+    func connect(_ integration: Integration, approvals: Bool = false) {
+        do {
+            try IntegrationSetup.connectFile(integration, cli: bundledCLI, approvals: approvals)
+            setupMessage = "\(integration.displayName) connected. Restart any open \(integration.displayName) sessions or windows."
+        } catch {
+            setupMessage = "\(error)"
+        }
+        refreshIntegrations()
+    }
+
+    func disconnect(_ integration: Integration) {
+        do {
+            try IntegrationSetup.disconnectFile(integration)
+            setupMessage = "\(integration.displayName) disconnected."
+        } catch {
+            setupMessage = "\(error)"
+        }
+        refreshIntegrations()
+    }
+
+    /// Cursor and Antigravity: turn AgentBar answering their terminal commands on or off.
+    func setApprovals(_ integration: Integration, _ on: Bool) {
+        connect(integration, approvals: on)
+        if on { setupMessage = "AgentBar will now ask you about \(integration.displayName)'s terminal commands. If you don't answer within \(Integration.ideWait) seconds, \(integration.displayName) asks as usual." }
     }
 
     /// The agentbar command inside this app.

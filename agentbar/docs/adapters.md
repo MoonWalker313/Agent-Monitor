@@ -8,6 +8,23 @@ This adds AgentBar's hooks to `~/.claude/settings.json`, keeps your other settin
 
 You get every session, its tasks (edits, commands, prompts), and permission requests with **Allow / Deny** in AgentBar. If you don't answer within 5 minutes, or click *Answer in terminal*, Claude asks in the terminal as usual. Details: [`adapters/claude-code/README.md`](../adapters/claude-code/README.md).
 
+## 1b. Cursor, Gemini CLI and Antigravity: one click
+**Settings → Agents → Connect** next to each. What each can do depends on what the tool lets outside programs see:
+
+| | Sessions and tasks | Knows it's waiting for you | Allow / Deny in AgentBar | Settings file |
+|---|---|---|---|---|
+| Cursor | ✅ edits, commands, finished | — | ✅ terminal commands (opt-in) | `~/.cursor/hooks.json` |
+| Gemini CLI | ✅ prompts, tools, finished | ✅ when it asks permission | — you answer in Gemini | `~/.gemini/settings.json` |
+| Antigravity (IDE, app, CLI) | ✅ prompts, edits, commands, finished | — | ✅ terminal commands (opt-in) | `~/.gemini/config/hooks.json` |
+
+- **Opt-in approvals** (Cursor, Antigravity): turn on *Answer … terminal commands here*. Each terminal command then waits up to 60 seconds for Allow / Deny in AgentBar, then the tool asks as usual. Answering in AgentBar sends `allow` / `deny`; *Answer in terminal*, no answer, or AgentBar being closed sends `ask`, never silence. (Cursor runs a command when a hook stays silent, so the adapter always replies.)
+- Restart open sessions or windows after connecting.
+- Gemini CLI's hooks can report that it's waiting for permission but can't answer it, so AgentBar shows *Needs you* and you answer in Gemini.
+- These hooks cover each tool's **own** agent. Another agent running inside the tool (for example OpenCode in Antigravity's terminal) isn't seen by them; run it with `agentbar run -- opencode` instead.
+- From Terminal: `agentbar connect cursor --approvals`, `agentbar disconnect antigravity`, and so on.
+
+**Troubleshooting:** if an agent doesn't show up, create the file `~/Library/Application Support/AgentBar/hook-debug`, use the agent once, and look at `hook-debug.log` next to it: it lists every hook call and AgentBar's reply. Antigravity also logs hook-file problems in `~/.gemini/antigravity/log/`. Delete both debug files afterwards, since the log can contain your prompts.
+
 ## 2. Any command: `agentbar run`
 Install the command once: **Settings → Agents → agentbar command → Install** (links `~/.local/bin/agentbar`).
 

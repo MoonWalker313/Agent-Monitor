@@ -94,7 +94,7 @@ struct SettingsView: View {
             } header: {
                 Text("Agents")
             } footer: {
-                Text("Connecting adds AgentBar to Claude Code's settings (~/.claude/settings.json). Your other settings are kept, and the previous file is saved as settings.json.agentbar-backup. For any other agent or script, run it with: agentbar run -- your-command")
+                Text("Connecting adds AgentBar's hooks to that agent's settings file in your home folder. Your other settings are kept, and the previous file is saved next to it with .agentbar-backup on the end.")
                     .foregroundStyle(.secondary)
             }
         }
@@ -150,24 +150,13 @@ final class SettingsWindowController {
     }
 }
 
-/// Claude Code connection and the command-line tool, shared by Settings and the setup guide.
+/// Agent connections and the command-line tool, shared by Settings and the setup guide.
 struct AgentsSettings: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        LabeledContent {
-            HStack(spacing: 8) {
-                if model.claudeConnected {
-                    Label("Connected", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.greenInk)
-                    Button("Disconnect") { model.disconnectClaude() }
-                } else {
-                    Button("Connect") { model.connectClaude() }
-                        .help("Adds AgentBar's hooks to ~/.claude/settings.json")
-                }
-            }
-        } label: {
-            Text("Claude Code")
-            Text("Shows every session, and lets you answer permission requests here.")
+        ForEach(Integration.allCases) { integration in
+            AgentRow(integration: integration)
         }
         LabeledContent {
             if model.cliInstalled {
@@ -178,11 +167,52 @@ struct AgentsSettings: View {
             }
         } label: {
             Text("agentbar command")
-            Text("For running other agents and scripts from Terminal.")
+            Text("For any other agent or script: agentbar run -- your-command")
         }
         if let message = model.setupMessage {
             Text(verbatim: message).font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+struct AgentRow: View {
+    @EnvironmentObject private var model: AppModel
+    let integration: Integration
+
+    private var isConnected: Bool { model.connected[integration] ?? false }
+
+    var body: some View {
+        LabeledContent {
+            HStack(spacing: 8) {
+                if isConnected {
+                    Label("Connected", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.greenInk)
+                    Button("Disconnect") { model.disconnect(integration) }
+                } else {
+                    Button("Connect") { model.connect(integration) }
+                        .help("Adds AgentBar's hooks to \(integration.displayPath)")
+                }
+            }
+        } label: {
+            Text(integration.displayName)
+            Text(caption)
+        }
+        if isConnected && integration.approvalsAreOptional {
+            Toggle(isOn: Binding(get: { model.approvals[integration] ?? false },
+                                 set: { model.setApprovals(integration, $0) })) {
+                Text("Answer \(integration.displayName)'s terminal commands here")
+                Text("Each terminal command waits for Allow or Deny in AgentBar for up to \(Integration.ideWait) seconds, then \(integration.displayName) asks as usual.")
+            }
+            .padding(.leading, 16)
+        }
+    }
+
+    private var caption: String {
+        switch integration {
+        case .claude: return "Sessions, tasks, and permission requests you can Allow or Deny here."
+        case .cursor: return "Sessions, edits and commands. Can also answer its terminal commands."
+        case .gemini: return "Sessions, tasks, and an alert when it's waiting for your permission (you answer in Gemini)."
+        case .antigravity: return "Sessions, edits and commands. Can also answer its terminal commands."
         }
     }
 }

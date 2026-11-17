@@ -16,11 +16,13 @@ usage:
   agentbar run [--agent NAME] [--title TEXT] -- COMMAND [ARGS...]
                                        run any command and show it in AgentBar (started, done or failed)
   agentbar status [--json]             show what AgentBar is showing
+  agentbar connect|disconnect claude|cursor|gemini|antigravity [--approvals]
+                                       add or remove AgentBar's hooks in that agent's settings
   agentbar emit --agent NAME --session ID --event KIND
                [--title TEXT] [--message TEXT] [--cwd PATH] [--open-url URL] [--strict] [--verbose]
   agentbar emit --json [--strict]      read one JSON event per line from stdin
-  agentbar hook claude [--wait SECONDS]
-                                       Claude Code hook adapter (reads hook JSON on stdin)
+  agentbar hook claude|cursor|gemini|antigravity [--wait SECONDS]
+                                       agent hook adapters (read the hook's JSON on stdin)
   agentbar version
 
 KIND: \(EventKind.allCases.map(\.rawValue).joined(separator: ", "))
@@ -110,10 +112,14 @@ let args = CommandLine.arguments.dropFirst()
 switch args.first {
 case "emit": emit(args.dropFirst())
 case "run": RunCommand.run(args.dropFirst())
+case "connect", "disconnect": ConnectCommand.run(args.first!, args.dropFirst())
 case "status": StatusCommand.run(args.dropFirst())
 case "hook":
-    guard args.dropFirst().first == "claude" else { fail("usage: agentbar hook claude [--wait SECONDS]") }
-    ClaudeHook.run(args.dropFirst(2))
+    switch args.dropFirst().first {
+    case "claude": ClaudeHook.run(args.dropFirst(2))
+    case let name? where ["cursor", "gemini", "antigravity"].contains(name): OtherHooks.run(name, args.dropFirst(2))
+    default: fail("usage: agentbar hook claude|cursor|gemini|antigravity [--wait SECONDS]")
+    }
 case "version", "--version": print("agentbar \(version)")
 case "-h", "--help", nil: print(usage)
 default: fail("unknown command '\(args.first!)'\n\n\(usage)")

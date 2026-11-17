@@ -28,6 +28,8 @@ Everything stays in `~/Library/Application Support/AgentBar/` (folder `0700`, fi
 - **Event log:** only the event kind and time, never message text.
 - **Daily totals.**
 
+If you turn on hook troubleshooting (`hook-debug`), every hook call is also written to `hook-debug.log` (0600) in the same folder until you delete the flag file; it can contain prompts and the agents' account details, so delete it after use.
+
 History is deleted after 30 days by default (7, 30 or 90 in Settings), or immediately with **⚙︎ → Clear History**. AgentBar never reads your files or full transcripts, and sends nothing over the network.
 
 Preferences are in the standard macOS preferences for `dev.agentbar.AgentBar`.

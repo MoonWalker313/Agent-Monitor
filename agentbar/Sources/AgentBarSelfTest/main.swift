@@ -481,8 +481,12 @@ suite("engine: permission request lifecycle") {
     check(engine.sessions["a/s1"]?.state == .waiting && engine.sessions["a/s1"]?.pendingRequest == nil, "defer → card gone, still needs you")
 
     engine.apply(permissionEvent(id: "r4"), now: at(70))
-    engine.apply(AgentEvent(agent: "a", sessionID: "s1", event: .working), now: at(71))
-    check(engine.sessions["a/s1"]?.pendingRequest == nil, "agent moving on clears the request")
+    engine.apply(AgentEvent(agent: "a", sessionID: "s1", event: .working, activity: "Edited x"), now: at(71))
+    check(engine.sessions["a/s1"]?.pendingRequest?.id == "r4" && engine.sessions["a/s1"]?.state == .waiting,
+          "other activity while the agent waits keeps the request open (Cursor reports edits mid-request)")
+    check(engine.sessions["a/s1"]?.recentActivity.last?.text == "Edited x", "that activity is still recorded")
+    engine.apply(AgentEvent(agent: "a", sessionID: "s1", event: .finished), now: at(72))
+    check(engine.sessions["a/s1"]?.pendingRequest == nil && engine.sessions["a/s1"]?.state == .finished, "the session ending clears the request")
 
     engine.apply(permissionEvent(id: "r5"), now: at(80))
     let restored = SessionEngine(config: EngineConfig(calendar: utc), restoring: Array(engine.sessions.values), totals: nil, now: at(90))
@@ -732,6 +736,52 @@ suite("security: Claude settings keep permissions and symlinks") {
     check((try FileManager.default.attributesOfItem(atPath: link + ".agentbar-backup")[.posixPermissions] as? Int) == 0o600, "backup is private (0600)")
 }
 
+suite("integrations: Cursor, Gemini CLI, Antigravity config") {
+    let cli = "/Applications/AgentBar.app/Contents/Helpers/agentbar"
+    // Cursor
+    let cursorMine: [String: Any] = ["version": 1, "hooks": ["afterFileEdit": [["command": "./format.sh"]]]]
+    let c1 = IntegrationSetup.connect(.cursor, cursorMine, cli: cli)
+    let ch = c1["hooks"] as? [String: Any] ?? [:]
+    check(IntegrationSetup.isConnected(.cursor, c1) && !IntegrationSetup.approvalsOn(.cursor, c1), "Cursor connected, approvals off by default")
+    check((ch["afterFileEdit"] as? [[String: Any]])?.count == 2 && (ch["afterFileEdit"] as? [[String: Any]])?.first?["command"] as? String == "./format.sh", "Cursor: user's hook kept")
+    check(ch["beforeShellExecution"] == nil, "Cursor: no command interception unless opted in")
+    let c2 = IntegrationSetup.connect(.cursor, c1, cli: cli, approvals: true)
+    let shell = ((c2["hooks"] as? [String: Any])?["beforeShellExecution"] as? [[String: Any]])?.first
+    check(IntegrationSetup.approvalsOn(.cursor, c2) && (shell?["timeout"] as? Int ?? 0) > Integration.ideWait, "Cursor approvals: hook timeout longer than AgentBar's wait")
+    check(((c2["hooks"] as? [String: Any])?["afterFileEdit"] as? [Any])?.count == 2, "Cursor: reconnecting doesn't duplicate")
+    let c3 = IntegrationSetup.disconnect(.cursor, c2)
+    check(!IntegrationSetup.isConnected(.cursor, c3) && ((c3["hooks"] as? [String: Any])?.keys.sorted() == ["afterFileEdit"]), "Cursor: disconnect leaves only the user's hook")
+    check(IntegrationSetup.disconnect(.cursor, IntegrationSetup.connect(.cursor, [:], cli: cli)).isEmpty, "Cursor: connect then disconnect on empty file is a clean no-op")
+
+    // Gemini CLI
+    let g1 = IntegrationSetup.connect(.gemini, ["theme": "Dracula"], cli: cli)
+    let gh = g1["hooks"] as? [String: Any] ?? [:]
+    let gHandler = ((gh["Notification"] as? [[String: Any]])?.first?["hooks"] as? [[String: Any]])?.first
+    check(IntegrationSetup.isConnected(.gemini, g1) && (gHandler?["timeout"] as? Int) == 5_000, "Gemini: connected, timeout in ms")
+    check(g1["theme"] as? String == "Dracula", "Gemini: other settings kept")
+    let g2 = IntegrationSetup.disconnect(.gemini, IntegrationSetup.connect(.gemini, g1, cli: cli))
+    check(!IntegrationSetup.isConnected(.gemini, g2) && g2["hooks"] == nil && g2["theme"] as? String == "Dracula", "Gemini: disconnect clean")
+    check(!Integration.gemini.supportsApprovals, "Gemini: no approvals (its hooks can't answer its prompt)")
+
+    // Antigravity
+    let a1 = IntegrationSetup.connect(.antigravity, ["my-linter": ["PostToolUse": []]], cli: cli, approvals: true)
+    let ours = a1[IntegrationSetup.antigravityKey] as? [String: Any] ?? [:]
+    let pre = (ours["PreToolUse"] as? [[String: Any]])?.first
+    let preCmd = ((pre?["hooks"] as? [[String: Any]])?.first?["command"] as? String) ?? ""
+    check(pre?["matcher"] as? String == "run_command" && preCmd.contains("--event PreToolUse") && preCmd.contains("--wait"), "Antigravity approvals: terminal commands only, event named")
+    check(a1["my-linter"] != nil && IntegrationSetup.approvalsOn(.antigravity, a1), "Antigravity: user's hooks kept")
+    let start = (ours["SessionStart"] as? [[String: Any]])?.first
+    let post = (ours["PostToolUse"] as? [[String: Any]])?.first
+    check(start?["command"] != nil && start?["hooks"] == nil, "Antigravity: SessionStart is a flat handler list (its guide)")
+    check(post?["matcher"] as? String == "*" && post?["hooks"] != nil, "Antigravity: PostToolUse grouped with matcher *")
+    let a2 = IntegrationSetup.disconnect(.antigravity, a1)
+    check(a2[IntegrationSetup.antigravityKey] == nil && a2["my-linter"] != nil, "Antigravity: disconnect removes only ours")
+
+    // Adapters don't recognise each other's commands.
+    check(IntegrationSetup.isAgentBarCommand("'/A B/agentbar' hook cursor --wait 60", adapter: "cursor"), "quoted path matched")
+    check(!IntegrationSetup.isAgentBarCommand("/x/agentbar hook cursor", adapter: "claude"), "adapters kept apart")
+}
+
 // MARK: - Load test (plan M1 exit criteria: 1,000 events/s across 50 sessions)
 
 suite("load: 1,000 events across 50 sessions through socket + engine + SQLite") {
@@ -880,6 +930,95 @@ if let cli = ProcessInfo.processInfo.environment["AGENTBAR_CLI"] {
         _ = try hook(#"{"hook_event_name":"Stop","session_id":"cc1","cwd":"\#(cwd)"}"#)
         check(store.snapshot().sessions["claude-code/cc1"]?.state == .finished, "Stop → finished")
         check(try hook("not json") == 0, "garbage stdin never fails the hook")
+
+        // --- other adapters ---
+        func adapter(_ name: String, _ json: String, extra: [String] = [], socket: String? = nil) throws -> Int32 {
+            try run(["hook", name] + extra, stdin: json, socket: socket)
+        }
+        func answerNext(_ key: String, _ decision: Decision) {
+            DispatchQueue.global().async {
+                for _ in 0..<400 {
+                    if let request = store.snapshot().sessions[key]?.pendingRequest {
+                        if server.resolve(SocketServer.AwaitInfo(sessionKey: key, requestID: request.id), decision: decision, shown: request) {
+                            store.resolveRequest(sessionKey: key, requestID: request.id, decision: decision)
+                        }
+                        return
+                    }
+                    usleep(10_000)
+                }
+            }
+        }
+        // Cursor
+        let cur = #""conversation_id":"cu1","workspace_roots":["/Users/me/code/app"],"generation_id":"g1""#
+        check(try adapter("cursor", "{\(cur),\"hook_event_name\":\"sessionStart\"}") == 0 && lastOut.text.isEmpty, "Cursor: observing hooks print nothing")
+        _ = try adapter("cursor", "{\(cur),\"hook_event_name\":\"afterFileEdit\",\"file_path\":\"/Users/me/code/app/main.ts\"}")
+        _ = try adapter("cursor", "{\(cur),\"hook_event_name\":\"afterShellExecution\",\"command\":\"npm test\"}")
+        let cu = store.snapshot().sessions["cursor/cu1"]
+        check(cu?.title == "app" && cu?.recentActivity.map(\.text) == ["Edited main.ts", "Ran npm test"], "Cursor: edits and commands become tasks")
+        _ = try adapter("cursor", "{\(cur),\"hook_event_name\":\"beforeSubmitPrompt\",\"prompt\":\"Tidy the build\"}")
+        check(store.snapshot().sessions["cursor/cu1"]?.recentActivity.last?.text == "You asked: Tidy the build", "Cursor: prompt becomes a task")
+        // Real Cursor sends an edit in the same instant it asks to run a command; the card must survive it.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) {
+            _ = try? adapter("cursor", "{\(cur),\"hook_event_name\":\"afterFileEdit\",\"file_path\":\"/Users/me/code/app/b.ts\"}")
+        }
+        DispatchQueue.global().async {
+            Thread.sleep(forTimeInterval: 1.2)
+            if let request = store.snapshot().sessions["cursor/cu1"]?.pendingRequest,
+               server.resolve(SocketServer.AwaitInfo(sessionKey: "cursor/cu1", requestID: request.id), decision: .allow, shown: request) {
+                store.resolveRequest(sessionKey: "cursor/cu1", requestID: request.id, decision: .allow)
+            }
+        }
+        _ = try adapter("cursor", "{\(cur),\"hook_event_name\":\"beforeShellExecution\",\"command\":\"rm -rf dist\"}", extra: ["--wait", "20"])
+        check(lastOut.text.contains(#""permission":"allow""#), "Cursor: Allow → permission allow (\(lastOut.text.trimmingCharacters(in: .whitespacesAndNewlines)))")
+        answerNext("cursor/cu1", .deny)
+        _ = try adapter("cursor", "{\(cur),\"hook_event_name\":\"beforeShellExecution\",\"command\":\"rm -rf /\"}", extra: ["--wait", "20"])
+        check(lastOut.text.contains(#""permission":"deny""#) && lastOut.text.contains("agent_message"), "Cursor: Deny → permission deny + message")
+        answerNext("cursor/cu1", .deferred)
+        _ = try adapter("cursor", "{\(cur),\"hook_event_name\":\"beforeShellExecution\",\"command\":\"ls\"}", extra: ["--wait", "20"])
+        check(lastOut.text.contains(#""permission":"ask""#), "Cursor: Answer in terminal → ask")
+        _ = try adapter("cursor", "{\(cur),\"hook_event_name\":\"beforeShellExecution\",\"command\":\"ls\"}", extra: ["--wait", "5"], socket: missing)
+        check(lastOut.text.contains(#""permission":"ask""#), "Cursor: AgentBar closed → still answers ask (never silent)")
+        check(try adapter("cursor", "garbage", extra: ["--wait", "5"]) == 0, "Cursor: garbage input exits 0")
+        _ = try adapter("cursor", "{\(cur),\"hook_event_name\":\"stop\",\"status\":\"completed\"}")
+        check(store.snapshot().sessions["cursor/cu1"]?.state == .finished, "Cursor: stop completed → finished")
+        check(store.snapshot().sessions["cursor/cu1"]?.usage.totalTokens == 0, "Cursor: no usage when not reported")
+        _ = try adapter("cursor", "{\(cur),\"hook_event_name\":\"stop\",\"status\":\"completed\",\"input_tokens\":1000,\"output_tokens\":50}")
+        check(store.snapshot().sessions["cursor/cu1"]?.usage.totalTokens == 1050, "Cursor: stop reports token usage")
+        _ = try hook(#"{"hook_event_name":"PreToolUse","conversation_id":"cu9","session_id":"cu9","cursor_version":"3.25.9","tool_name":"Shell","tool_input":{"command":"ls"}}"#)
+        check(store.snapshot().sessions["claude-code/cu9"] == nil, "Cursor calling the Claude adapter is ignored")
+
+        // Gemini CLI
+        let gem = #""session_id":"ge1","cwd":"/Users/me/code/svc""#
+        check(try adapter("gemini", "{\(gem),\"hook_event_name\":\"BeforeAgent\",\"prompt\":\"Fix the login bug\"}") == 0
+              && lastOut.text.trimmingCharacters(in: .whitespacesAndNewlines) == "{}", "Gemini: prints {} (valid JSON, no decision)")
+        _ = try adapter("gemini", "{\(gem),\"hook_event_name\":\"Notification\",\"notification_type\":\"ToolPermission\",\"message\":\"Allow run_shell_command?\"}")
+        let g = store.snapshot().sessions["gemini-cli/ge1"]
+        check(g?.state == .waiting && g?.message?.contains("Allow run_shell_command?") == true && g?.pendingRequest == nil, "Gemini: permission prompt → needs you (no card)")
+        _ = try adapter("gemini", "{\(gem),\"hook_event_name\":\"AfterTool\",\"tool_name\":\"run_shell_command\",\"tool_input\":{\"command\":\"go test ./...\"}}")
+        check(store.snapshot().sessions["gemini-cli/ge1"]?.state == .running && store.snapshot().sessions["gemini-cli/ge1"]?.recentActivity.last?.text == "Ran go test ./...", "Gemini: tool ran → back to running, task recorded")
+        _ = try adapter("gemini", "{\(gem),\"hook_event_name\":\"AfterAgent\"}")
+        check(store.snapshot().sessions["gemini-cli/ge1"]?.state == .finished, "Gemini: AfterAgent → finished")
+
+        // Antigravity
+        let ag = #""conversationId":"ag1","workspacePaths":["/Users/me/code/site"]"#
+        _ = try adapter("antigravity", "{\(ag),\"invocationNum\":0,\"lastUserInput\":\"Add a dark mode\"}", extra: ["--event", "PreInvocation"])
+        _ = try adapter("antigravity", "{\(ag),\"toolCall\":{\"name\":\"write_file\",\"args\":{\"Path\":\"/Users/me/code/site/theme.css\",\"Content\":\"x\"}},\"stepIdx\":3}", extra: ["--event", "PostToolUse"])
+        let a = store.snapshot().sessions["antigravity/ag1"]
+        check(a?.message == "Working on: Add a dark mode" && a?.recentActivity.map(\.text) == ["You asked: Add a dark mode", "Wrote theme.css"], "Antigravity: prompt and edits become tasks")
+        answerNext("antigravity/ag1", .allow)
+        _ = try adapter("antigravity", "{\(ag),\"toolCall\":{\"name\":\"run_command\",\"args\":{\"CommandLine\":\"ls\",\"toolSummary\":\"List directory contents\"}},\"stepIdx\":4}", extra: ["--event", "PreToolUse", "--wait", "20"])
+        check(lastOut.text.contains(#""decision":"allow""#), "Antigravity: Allow → allow")
+        check(store.snapshot().sessions["antigravity/ag1"]?.recentActivity.last?.text == "You allowed: List directory contents",
+              "Antigravity: the card used its own plain-language summary (toolSummary)")
+        _ = try adapter("antigravity", "{\(ag),\"toolCall\":{\"name\":\"run_command\",\"args\":{\"CommandLine\":\"ls\"}},\"stepIdx\":5}", extra: ["--event", "PreToolUse", "--wait", "5"], socket: missing)
+        check(lastOut.text.contains(#""decision":"ask""#), "Antigravity: AgentBar closed → ask")
+        _ = try adapter("antigravity", "{\(ag),\"hookEventName\":\"PostToolUse\",\"toolCall\":{\"name\":\"run_command\",\"args\":{\"CommandLine\":\"ls\"}},\"stepIdx\":6}")
+        check(lastOut.text.trimmingCharacters(in: .whitespacesAndNewlines) == "{}", "Antigravity: observing events answer {}")
+        _ = try adapter("antigravity", "{\(ag),\"hookEventName\":\"Stop\",\"executionNum\":1,\"terminationReason\":\"NO_TOOL_CALL\",\"error\":\"\",\"fullyIdle\":true}")
+        check(store.snapshot().sessions["antigravity/ag1"]?.state == .finished, "Antigravity: normal stop with empty error → finished")
+        check(lastOut.text.contains(#""decision":"stop""#), "Antigravity: Stop answers without forcing continue")
+        _ = try adapter("antigravity", "{\(ag),\"hookEventName\":\"Stop\",\"terminationReason\":\"USER_CANCELED\",\"fullyIdle\":true}")
+        check(store.snapshot().sessions["antigravity/ag1"]?.state == .stopped, "Antigravity: cancelled → stopped")
 
         // --- agentbar run ---
         check(try run(["run", "--agent", "builder", "--session", "job1", "--", "/bin/sh", "-c", "echo building; exit 0"]) == 0, "run: exit 0 passes through")

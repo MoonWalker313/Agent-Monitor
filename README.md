@@ -36,7 +36,7 @@ AI agents stop and wait: for a permission, an answer, a review. When you run sev
 - **Every agent, grouped by what it needs from you:** Needs you, Running, Done today. Click an agent to see its tasks (the last 20) and details.
 - **Notices problems:** a running agent that goes quiet is marked *may be stuck*; one that needs you but stays silent for an hour is retired automatically. Errors alert you.
 - **Today at a glance:** sessions, tasks done, how long agents waited on you, tokens and cost (when the agent reports them), with optional daily limits.
-- **Works with any agent:** one-click Claude Code connection, `agentbar run -- <command>` for anything else, and a small local protocol for your own tools.
+- **Works with your agents:** one-click connections for **Claude Code, Cursor, Gemini CLI and Antigravity**, `agentbar run -- <command>` for anything else, and a small local protocol for your own tools.
 - **Native and private:** built in SwiftUI, follows light/dark mode, VoiceOver and Reduce Motion; everything stays on your Mac.
 
 <p align="center">
@@ -64,8 +64,15 @@ On first launch a short **setup guide** opens:
 
 1. **Allow alerts** so you hear about requests while you work in other apps.
 2. **Open at login**: agents can only reach AgentBar while it's running.
-3. **Connect your agents:**
-   - **Claude Code:** click **Connect**. AgentBar adds its hooks to `~/.claude/settings.json`, keeps your other settings, and saves a backup. Restart open Claude Code sessions.
+3. **Connect your agents:** click **Connect** next to each one you use. AgentBar adds its hooks to that tool's settings file, keeps your other settings, and saves a backup. Restart open sessions afterwards.
+
+   | | Sessions and tasks | Knows it's waiting for you | Allow / Deny in AgentBar |
+   |---|---|---|---|
+   | Claude Code | ✅ | ✅ | ✅ |
+   | Cursor | ✅ | — | ✅ terminal commands (opt-in) |
+   | Gemini CLI | ✅ | ✅ | — (answer in Gemini) |
+   | Antigravity | ✅ | — | ✅ terminal commands (opt-in) |
+
    - **Anything else:** click **Install** for the `agentbar` command, then run your agent or script through it:
      ```bash
      agentbar run -- npm run build
@@ -85,14 +92,14 @@ agentbar run -- <command>  # report any command: running, then done or failed
 
 ## How permission requests work
 
-When Claude Code (or any connected agent) asks permission, it **waits** while AgentBar shows the request:
+When a connected agent asks permission (Claude Code always; Cursor and Antigravity for terminal commands once you turn it on), it **waits** while AgentBar shows the request:
 
 | You choose | The agent gets |
 |---|---|
 | **Allow** | Permission for exactly this one action |
 | **Deny** | A refusal ("The user denied this from AgentBar.") |
 | **Answer in terminal** | Nothing from AgentBar; it asks in its own window as usual |
-| *(no answer in 5 minutes, or AgentBar isn't running)* | Same as *Answer in terminal* |
+| *(no answer in time, or AgentBar isn't running)* | Same as *Answer in terminal* (5 minutes for Claude Code, 60 seconds for Cursor and Antigravity) |
 
 Nothing is ever approved without your click. Notifications offer **Allow** only when the whole command fits in the banner, and only with your Mac unlocked. Longer commands show **Review…** instead.
 

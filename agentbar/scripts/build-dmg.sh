@@ -50,6 +50,26 @@ for pt in 16 32 128 256 512; do
   cp "$ART/icon_$((pt * 2)).png" "$ICONSET/icon_${pt}x${pt}@2x.png"
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+# Asset catalog (Assets.car): macOS 26's Notification Center reads the app icon from here and shows a
+# blank square for .icns-only apps. Needs Xcode's actool; Command-Line-Tools-only builds keep the .icns.
+if ACTOOL="$(xcrun --find actool 2>/dev/null)"; then
+  XCA="$ART/Assets.xcassets"; rm -rf "$XCA"; mkdir -p "$XCA/AppIcon.appiconset"
+  printf '{"info":{"author":"xcode","version":1}}' > "$XCA/Contents.json"
+  IMAGES=""
+  for pt in 16 32 128 256 512; do
+    cp "$ART/icon_${pt}.png" "$XCA/AppIcon.appiconset/icon_${pt}.png"
+    cp "$ART/icon_$((pt * 2)).png" "$XCA/AppIcon.appiconset/icon_${pt}@2x.png"
+    IMAGES="$IMAGES{\"idiom\":\"mac\",\"size\":\"${pt}x${pt}\",\"scale\":\"1x\",\"filename\":\"icon_${pt}.png\"},"
+    IMAGES="$IMAGES{\"idiom\":\"mac\",\"size\":\"${pt}x${pt}\",\"scale\":\"2x\",\"filename\":\"icon_${pt}@2x.png\"},"
+  done
+  printf '{"images":[%s],"info":{"author":"xcode","version":1}}' "${IMAGES%,}" > "$XCA/AppIcon.appiconset/Contents.json"
+  "$ACTOOL" "$XCA" --compile "$APP/Contents/Resources" --platform macosx --minimum-deployment-target 13.0 \
+    --app-icon AppIcon --output-partial-info-plist "$ART/assetcatalog-info.plist" --errors --warnings >/dev/null
+  test -f "$APP/Contents/Resources/Assets.car" || { echo "error: actool didn't produce Assets.car" >&2; exit 1; }
+  # actool also rewrites AppIcon.icns from the catalog; both stay, for older macOS and Finder.
+else
+  echo "warning: Xcode's actool not found; notifications may show a blank icon on macOS 26 (only .icns bundled)" >&2
+fi
 tiffutil -cathidpicheck "$ART/dmg-background.png" "$ART/dmg-background@2x.png" -out "$ART/dmg-background.tiff" >/dev/null
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null

@@ -201,7 +201,7 @@ public struct SessionEngine: Sendable {
         let key = Session.key(agent: event.agent, sessionID: event.sessionID)
         let existing = sessions[key]
 
-        let newState: SessionState
+        var newState: SessionState
         switch event.event {
         case .started, .working: newState = .running
         // A heartbeat proves the agent is alive. It revives a stale session but
@@ -212,6 +212,12 @@ public struct SessionEngine: Sendable {
         case .error: newState = .errored
         case .stopped: newState = .stopped
         }
+
+        // An open permission request stays open while the agent waits on it, even if the agent
+        // reports other activity meanwhile (Cursor reports a file edit in the same instant it asks
+        // to run a command). Only its answer, the agent leaving, or the session ending closes it.
+        let ending = [.finished, .errored, .stopped].contains(newState)
+        if existing?.pendingRequest != nil && event.request == nil && !ending { newState = .waiting }
 
         var session = existing ?? Session(agent: event.agent, sessionID: event.sessionID, state: newState, at: now)
         let today = totals.day
@@ -242,7 +248,7 @@ public struct SessionEngine: Sendable {
             // Never let a later event change what an open request says: the user must approve
             // exactly what the waiting agent asked. A new id replaces the card; the same id doesn't.
             if session.pendingRequest?.id != request.id { session.pendingRequest = request }
-        } else if newState != .waiting {
+        } else if ending {
             session.pendingRequest = nil
         }
         if let cwd = event.cwd { session.cwd = cwd }
