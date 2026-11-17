@@ -11,7 +11,7 @@ defaults:
     working-directory: agentbar   # the app lives in agentbar/; docs (PRD, plan) sit at the repo root
 jobs:
   release:
-    runs-on: macos-14
+    runs-on: macos-latest   # current GitHub macOS image (Xcode included)
     steps:
       - uses: actions/checkout@v4
       - name: Check the tag matches VERSION
