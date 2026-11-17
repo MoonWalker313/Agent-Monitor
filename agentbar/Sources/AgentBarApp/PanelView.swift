@@ -77,9 +77,9 @@ struct PanelView: View {
                     VStack(spacing: 10) {
                         ForEach(model.pendingRequests) { session in
                             if let request = session.pendingRequest {
-                                CueCard(session: session, request: request) { decision in
+                                CueCard(session: session, request: request) { decision, answers in
                                     withAnimation(.easeOut(duration: 0.2)) {
-                                        model.decide(sessionKey: session.id, requestID: request.id, decision: decision)
+                                        model.decide(sessionKey: session.id, requestID: request.id, decision: decision, answers: answers)
                                     }
                                 }
                                 .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))

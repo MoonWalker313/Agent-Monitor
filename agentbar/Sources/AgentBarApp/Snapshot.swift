@@ -58,6 +58,19 @@ enum Snapshot {
                                                                 detail: "rm -rf node_modules && npm install"),
                                  awaitSeconds: 60)
         DispatchQueue.global().async { _ = try? SocketClient.request(line(request), to: path, timeout: 30) }
+        let question = AgentEvent(agent: "claude-code", sessionID: "s3", event: .needsPermission, title: "launch-post",
+                                  request: PermissionRequestInfo(id: "q1", tool: "AskUserQuestion", summary: "Which tone for the intro?", questions: [
+                                      Question(question: "Which tone do you want for the intro?", header: "Tone", options: [
+                                          .init(label: "Playful", description: "Light, a joke in the first line"),
+                                          .init(label: "Formal", description: "Plain and direct"),
+                                      ]),
+                                  ]), awaitSeconds: 60)
+        let plan = AgentEvent(agent: "claude-code", sessionID: "s6", event: .needsPermission, title: "billing",
+                              request: PermissionRequestInfo(id: "p1", tool: "ExitPlanMode", summary: "Approve the plan and start working",
+                                                             detail: "Plan: add yearly billing\n1. Add a yearly price to Plans.swift\n2. Show the toggle on the pricing page\n3. Update the tests"),
+                              awaitSeconds: 60)
+        DispatchQueue.global().async { _ = try? SocketClient.request(line(question), to: path, timeout: 30) }
+        DispatchQueue.global().async { _ = try? SocketClient.request(line(plan), to: path, timeout: 30) }
     }
 
     @MainActor

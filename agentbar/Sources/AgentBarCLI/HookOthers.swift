@@ -68,6 +68,18 @@ enum OtherHooks {
 
     static let denied = "The user denied this from AgentBar."
 
+    /// A routine, read-only command (`ls`, `git status`…) when the user only wants to be asked about
+    /// changes: record it as activity, no popup. The caller then answers "allow".
+    static func passRoutine(_ command: String?, event: AgentEvent) -> Bool {
+        guard let command, CommandPolicy.autoAllowEnabled, CommandPolicy.isReadOnly(command) else { return false }
+        var e = event
+        e.event = .working
+        e.request = nil
+        e.activity = "Ran \(ClaudeHook.truncate(ClaudeHook.oneLine(command), 60))"
+        send(e)
+        return true
+    }
+
     // MARK: Cursor
 
     enum Cursor {
@@ -82,6 +94,10 @@ enum OtherHooks {
             case "beforeShellExecution":
                 // Approval hook: must always print a decision.
                 let command = hook["command"] as? String ?? ""
+                if OtherHooks.passRoutine(command, event: event) {
+                    OtherHooks.printJSON(["permission": "allow"])
+                    exit(0)
+                }
                 event.event = .needsPermission
                 event.request = PermissionRequestInfo(id: UUID().uuidString,
                                                       tool: "Terminal", summary: "Run a terminal command",
@@ -197,9 +213,16 @@ enum OtherHooks {
             let error = (hook["error"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             var reply: [String: Any] = [:]
             switch name {
+            case "PreToolUse" where tool == IntegrationSetup.antigravityQuestionTool:
+                OtherHooks.printJSON(question(args, event: event, wait: options.wait))
+                exit(0)
             case "PreToolUse":
                 // Approval hook (installed only for run_command): always answer.
                 let command = OtherHooks.string(args, ["CommandLine", "commandLine", "command", "cmd"])
+                if OtherHooks.passRoutine(command, event: event) {
+                    OtherHooks.printJSON(["decision": "allow"])
+                    exit(0)
+                }
                 event.event = .needsPermission
                 // Antigravity describes each command in plain words ("List directory contents").
                 let summary = OtherHooks.string(args, ["toolSummary"]) ?? "Run a terminal command"
@@ -222,6 +245,10 @@ enum OtherHooks {
                     event.message = "Working on: \(prompt)"
                     event.activity = "You asked: \(prompt)"
                 }
+            case "PostToolUse" where tool == IntegrationSetup.antigravityQuestionTool:
+                event.event = .working
+                let first = ((args["questions"] as? [[String: Any]])?.first?["question"] as? String).map { ClaudeHook.truncate(ClaudeHook.oneLine($0), 80) }
+                event.activity = "Asked you: \(first ?? "a question")"
             case "PostToolUse":
                 event.event = .working
                 let done = describe(tool, args)
@@ -249,6 +276,52 @@ enum OtherHooks {
             OtherHooks.send(event)
             OtherHooks.printJSON(reply)
             exit(0)
+        }
+
+        /// `ask_question`: `{"questions":[{"question": str, "options": [str], "is_multi_select": bool}]}`.
+        static func parseQuestions(_ args: [String: Any]) -> [Question]? {
+            guard let raw = args["questions"] as? [[String: Any]] else { return nil }
+            var questions: [Question] = []
+            for q in raw {
+                guard let text = q["question"] as? String, let options = q["options"] as? [String] else { return nil }
+                questions.append(Question(question: text, options: options.map { Question.Option(label: $0) },
+                                          multiSelect: q["is_multi_select"] as? Bool))
+            }
+            return EventCodec.cleanQuestions(questions)
+        }
+
+        /// Shows Antigravity's question in AgentBar. Antigravity's hooks can't hand a tool its result, so
+        /// an answer is delivered as the reason for not showing the question again: the agent reads it and
+        /// carries on. Anything else lets the tool run, and Antigravity asks in its own window as usual.
+        static func question(_ args: [String: Any], event base: AgentEvent, wait: Int) -> [String: Any] {
+            let runInApp: [String: Any] = ["decision": "allow"]
+            var event = base
+            guard let questions = parseQuestions(args), let raw = args["questions"] as? [[String: Any]], raw.count == questions.count else {
+                event.event = .needsInput
+                event.message = "Has a question for you in Antigravity"
+                OtherHooks.send(event)
+                return runInApp
+            }
+            event.event = .needsPermission
+            let summary = OtherHooks.string(args, ["toolSummary"]) ?? (questions.count == 1 ? questions[0].question : "Answer \(questions.count) questions")
+            event.request = PermissionRequestInfo(id: UUID().uuidString, tool: "Question", summary: summary, questions: questions)
+            var e = event
+            e.awaitSeconds = wait
+            let reply = ClaudeHook.awaitReply(e, wait: wait)
+            guard reply.decision == .allow, let answers = reply.answers, Question.validate(answers, for: questions) else { return runInApp }
+            // Antigravity's own answers read "A1: <option>"; keep that shape, using the original option text.
+            var lines: [String] = []
+            for (i, (q, rawQ)) in zip(questions, raw).enumerated() {
+                guard let answer = answers[q.question], let rawOptions = rawQ["options"] as? [String],
+                      rawOptions.count == q.options.count else { return runInApp }
+                let picked = q.options.map(\.label).contains(answer) ? [answer] : answer.components(separatedBy: ", ")
+                let original = picked.compactMap { label in q.options.firstIndex { $0.label == label }.map { rawOptions[$0] } }
+                guard original.count == picked.count else { return runInApp }
+                lines.append("A\(i + 1): \(original.joined(separator: ", "))")
+            }
+            let reason = "The user already answered this question in AgentBar, so it wasn't shown again. Their answer:\n"
+                + lines.joined(separator: "\n") + "\nContinue with this answer; don't ask the question again."
+            return ["decision": "deny", "reason": reason]
         }
 
         static func describe(_ tool: String, _ args: [String: Any]) -> String {

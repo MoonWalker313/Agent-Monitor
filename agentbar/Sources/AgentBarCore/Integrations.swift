@@ -45,6 +45,8 @@ public enum Integration: String, CaseIterable, Sendable, Identifiable {
 
     /// Seconds an IDE agent waits for an answer in AgentBar before asking in its own window.
     public static let ideWait = 60
+    /// Seconds an agent's question waits in AgentBar before the agent asks it in its own window.
+    public static let questionWait = 120
 }
 
 public enum IntegrationSetup {
@@ -107,7 +109,8 @@ public enum IntegrationSetup {
                 isAgentBarCommand((($0 as? [String: Any])?["command"] as? String) ?? "", adapter: "cursor")
             }
         case .antigravity:
-            return ((settings[antigravityKey] as? [String: Any])?["PreToolUse"]) != nil
+            return (((settings[antigravityKey] as? [String: Any])?["PreToolUse"] as? [[String: Any]]) ?? [])
+                .contains { $0["matcher"] as? String == "run_command" }
         }
     }
 
@@ -180,6 +183,8 @@ public enum IntegrationSetup {
 
     // Antigravity: { "<hook name>": { "<Event>": [ { "matcher"?: "...", "hooks": [ { "type": "command", ... } ] } ] } }
     public static let antigravityKey = "agentbar"
+    /// Antigravity's multiple-choice question tool.
+    public static let antigravityQuestionTool = "ask_question"
     static let antigravityEvents = ["SessionStart", "PreInvocation", "PostToolUse", "Stop"]
 
     static func connectAntigravity(_ settings: [String: Any], cli: String, approvals: Bool) -> [String: Any] {
@@ -193,13 +198,35 @@ public enum IntegrationSetup {
             let handler: [String: Any] = ["type": "command", "command": "\(cmd) --event \(event)", "timeout": 5]
             ours[event] = event == "PostToolUse" ? [["matcher": "*", "hooks": [handler]]] : [handler]
         }
+        // Questions (ask_question) always come to AgentBar's popup; terminal commands only with approvals on.
+        var pre: [[String: Any]] = [["matcher": antigravityQuestionTool,
+                                      "hooks": [["type": "command", "command": "\(cmd) --event PreToolUse --wait \(Integration.questionWait)",
+                                                 "timeout": Integration.questionWait + 15]]]]
         if approvals {
-            ours["PreToolUse"] = [["matcher": "run_command",
-                                   "hooks": [["type": "command", "command": "\(cmd) --event PreToolUse --wait \(Integration.ideWait)",
-                                              "timeout": Integration.ideWait + 15]]]]
+            pre.append(["matcher": "run_command",
+                        "hooks": [["type": "command", "command": "\(cmd) --event PreToolUse --wait \(Integration.ideWait)",
+                                   "timeout": Integration.ideWait + 15]]])
         }
+        ours["PreToolUse"] = pre
         s[antigravityKey] = ours
         return s
+    }
+
+    /// An Antigravity connection made before 1.2.0, without the question hook.
+    public static func needsUpgrade(_ integration: Integration, _ settings: [String: Any]) -> Bool {
+        guard integration == .antigravity, isConnected(.antigravity, settings) else { return false }
+        let pre = ((settings[antigravityKey] as? [String: Any])?["PreToolUse"] as? [[String: Any]]) ?? []
+        return !pre.contains { $0["matcher"] as? String == antigravityQuestionTool }
+    }
+
+    /// Rewrites AgentBar's own hooks in an older connection, keeping the approvals choice. Returns true if it did.
+    @discardableResult
+    public static func upgradeFile(_ integration: Integration, cli: String, path: String? = nil) throws -> Bool {
+        let p = path ?? integration.configPath
+        let current = try ClaudeSetup.read(p)
+        guard needsUpgrade(integration, current) else { return false }
+        try ClaudeSetup.write(connect(integration, current, cli: cli, approvals: approvalsOn(integration, current)), to: p)
+        return true
     }
 
     // MARK: Files

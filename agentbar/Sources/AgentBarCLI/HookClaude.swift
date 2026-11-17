@@ -40,9 +40,30 @@ enum ClaudeHook {
         guard var event = makeEvent(name: name, hook: hook) else { exit(0) } // hook we don't map
 
         if name == "PermissionRequest" {
+            let tool = hook["tool_name"] as? String
+            let input = hook["tool_input"] as? [String: Any] ?? [:]
+            if tool == "AskUserQuestion", event.request?.isQuestion != true {
+                // Questions AgentBar can't show as options: let Claude ask in the terminal, and say so.
+                event.request = nil
+                event.message = "Has a question for you in the terminal"
+                if let line = try? EventCodec.encodeLine(event) { _ = try? SocketClient.send([line], to: Paths.socketPath) }
+                exit(0)
+            }
             event.awaitSeconds = wait
-            let decision = awaitDecision(event, wait: wait)
-            if let output = decisionOutput(decision) { print(output) }
+            let reply = awaitReply(event, wait: wait)
+            let output: String?
+            switch tool {
+            case "AskUserQuestion":
+                output = questionOutput(reply, input: input, shown: event.request?.questions ?? [])
+            case "ExitPlanMode":
+                // Approving a plan needs the input echoed back; "keep planning" tells Claude to revise.
+                output = reply.decision == .allow ? decisionOutput(["behavior": "allow", "updatedInput": input])
+                    : reply.decision == .deny ? decisionOutput(["behavior": "deny", "message": "The user wants to keep planning. Ask what to change, then present a revised plan."])
+                    : nil
+            default:
+                output = decisionOutput(reply.decision ?? .deferred)
+            }
+            if let output { print(output) }
             exit(0)
         }
 
@@ -83,9 +104,21 @@ enum ClaudeHook {
             if let toolName { event.activity = "Failed: \(describe(toolName, toolInput).done)" }
         case "PermissionRequest":
             let d = describe(toolName ?? "tool", toolInput)
+            let id = (hook["tool_use_id"] as? String) ?? UUID().uuidString
             event.event = .needsPermission
-            event.request = PermissionRequestInfo(id: (hook["tool_use_id"] as? String) ?? UUID().uuidString,
-                                                  tool: toolName, summary: d.ask, detail: d.detail)
+            switch toolName {
+            case "AskUserQuestion":
+                let questions = parseQuestions(toolInput)
+                let summary = questions.map { $0.count == 1 ? $0[0].question : "Answer \($0.count) questions" }
+                event.request = PermissionRequestInfo(id: id, tool: toolName, summary: summary ?? "Answer a question",
+                                                      questions: questions)
+            case "ExitPlanMode":
+                let plan = (toolInput["plan"] as? String).map { truncate($0, EventCodec.maxDetailLength) }
+                event.request = PermissionRequestInfo(id: id, tool: toolName, summary: "Approve the plan and start working",
+                                                      detail: plan)
+            default:
+                event.request = PermissionRequestInfo(id: id, tool: toolName, summary: d.ask, detail: d.detail)
+            }
         case "Notification":
             let type = hook["notification_type"] as? String
             let message = (hook["message"] as? String).map(oneLine)
@@ -153,27 +186,81 @@ enum ClaudeHook {
         }
     }
 
+    // MARK: Questions
+
+    /// AskUserQuestion's `questions`, cleaned exactly as AgentBar will show them. nil if they can't be shown.
+    static func parseQuestions(_ input: [String: Any]) -> [Question]? {
+        guard let raw = input["questions"] as? [[String: Any]] else { return nil }
+        var questions: [Question] = []
+        for q in raw {
+            guard let text = q["question"] as? String, let options = q["options"] as? [[String: Any]] else { return nil }
+            let parsed = options.compactMap { o in (o["label"] as? String).map { Question.Option(label: $0, description: o["description"] as? String) } }
+            guard parsed.count == options.count else { return nil }
+            questions.append(Question(question: text, header: q["header"] as? String, options: parsed,
+                                      multiSelect: q["multiSelect"] as? Bool))
+        }
+        return EventCodec.cleanQuestions(questions)
+    }
+
+    /// Output for an answered AskUserQuestion: Claude's own input plus `answers`, written with the
+    /// original (uncleaned) question text and labels. Anything unexpected → nil, so Claude asks itself.
+    static func questionOutput(_ reply: ServerReply, input: [String: Any], shown: [Question]) -> String? {
+        switch reply.decision {
+        case .deny:
+            return decisionOutput(["behavior": "deny", "message": "The user chose not to answer this from AgentBar."])
+        case .allow:
+            guard let answers = reply.answers, Question.validate(answers, for: shown),
+                  let raw = input["questions"] as? [[String: Any]], raw.count == shown.count else { return nil }
+            var original: [String: String] = [:]
+            for (q, rawQ) in zip(shown, raw) {
+                guard let answer = answers[q.question], let rawText = rawQ["question"] as? String,
+                      let rawOptions = rawQ["options"] as? [[String: Any]], rawOptions.count == q.options.count else { return nil }
+                let picked = q.options.map(\.label).contains(answer) ? [answer] : answer.components(separatedBy: ", ")
+                var labels: [String] = []
+                for label in picked {
+                    guard let i = q.options.firstIndex(where: { $0.label == label }),
+                          let rawLabel = rawOptions[i]["label"] as? String else { return nil }
+                    labels.append(rawLabel)
+                }
+                original[rawText] = labels.joined(separator: ", ")
+            }
+            var updated = input
+            updated["answers"] = original
+            return decisionOutput(["behavior": "allow", "updatedInput": updated])
+        default:
+            return nil
+        }
+    }
+
     // MARK: Decision
 
     static func awaitDecision(_ event: AgentEvent, wait: Int) -> Decision {
-        guard let line = try? EventCodec.encodeLine(event) else { return .deferred }
+        awaitReply(event, wait: wait).decision ?? .deferred
+    }
+
+    /// Waits for the user's answer. Any failure (AgentBar closed, timeout, bad reply) is a deferral.
+    static func awaitReply(_ event: AgentEvent, wait: Int) -> ServerReply {
+        let deferred = ServerReply(ok: true, decision: .deferred)
+        guard let line = try? EventCodec.encodeLine(event) else { return deferred }
         do {
             let reply = try SocketClient.request(line, to: Paths.socketPath, timeout: TimeInterval(wait + 5))
-            return reply.ok ? (reply.decision ?? .deferred) : .deferred
+            return reply.ok && reply.decision != nil ? reply : deferred
         } catch {
             warn("AgentBar unavailable (\(error)); Claude Code will ask in the terminal")
-            return .deferred
+            return deferred
         }
     }
 
     /// Claude Code PermissionRequest hook output. nil = no decision (Claude asks normally).
     static func decisionOutput(_ decision: Decision) -> String? {
-        let body: [String: Any]
         switch decision {
-        case .allow: body = ["behavior": "allow"]
-        case .deny: body = ["behavior": "deny", "message": "The user denied this from AgentBar."]
+        case .allow: return decisionOutput(["behavior": "allow"])
+        case .deny: return decisionOutput(["behavior": "deny", "message": "The user denied this from AgentBar."])
         case .deferred: return nil
         }
+    }
+
+    static func decisionOutput(_ body: [String: Any]) -> String? {
         let output: [String: Any] = ["hookSpecificOutput": ["hookEventName": "PermissionRequest", "decision": body]]
         guard let data = try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]) else { return nil }
         return String(data: data, encoding: .utf8)

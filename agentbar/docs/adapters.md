@@ -17,6 +17,8 @@ You get every session, its tasks (edits, commands, prompts), and permission requ
 | Gemini CLI | ✅ prompts, tools, finished | ✅ when it asks permission | — you answer in Gemini | `~/.gemini/settings.json` |
 | Antigravity (IDE, app, CLI) | ✅ prompts, edits, commands, finished | — | ✅ terminal commands (opt-in) | `~/.gemini/config/hooks.json` |
 
+- **Questions** (Antigravity): when its agent asks a multiple-choice question (`ask_question`), the AgentBar popup shows the options for up to 2 minutes. Your answer goes back as the hook's reason, in Antigravity's own `A1: <option>` form, and the agent continues; *Answer in Antigravity*, no answer, or AgentBar being closed lets Antigravity ask as usual. On by default whenever Antigravity is connected.
+- **Routine commands:** with *Only ask about commands that change things* (Settings, on by default), strictly read-only commands (`ls`, `cat`, `grep`, `git status`…) are allowed without a popup and recorded as activity.
 - **Opt-in approvals** (Cursor, Antigravity): turn on *Answer … terminal commands here*. Each terminal command then waits up to 60 seconds for Allow / Deny in AgentBar, then the tool asks as usual. Answering in AgentBar sends `allow` / `deny`; *Answer in terminal*, no answer, or AgentBar being closed sends `ask`, never silence. (Cursor runs a command when a hook stays silent, so the adapter always replies.)
 - Restart open sessions or windows after connecting.
 - Gemini CLI's hooks can report that it's waiting for permission but can't answer it, so AgentBar shows *Needs you* and you answer in Gemini.

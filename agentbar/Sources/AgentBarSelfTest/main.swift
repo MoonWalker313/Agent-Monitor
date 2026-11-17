@@ -146,6 +146,65 @@ suite("rate limiter") {
     check(small.trackedKeys < 11, "idle keys pruned (\(small.trackedKeys))")
 }
 
+suite("only ask about commands that change things") {
+    let routine = ["ls", "ls -la src", "pwd", "git status", "git diff --stat", "git log --oneline -5", "git branch",
+                   "cat package.json | grep version", "find . -name '*.swift'", "rg TODO src", "wc -l a.txt b.txt",
+                   "ls 2>/dev/null", "ls -la 2>&1 || true", "cd src && ls", "node --version", "sort a.txt | uniq -c", "head -20 README.md"]
+    for c in routine { check(CommandPolicy.isReadOnly(c), "routine: \(c)") }
+    let changes = ["rm -rf dist", "npm install", "ls > out.txt", "echo hi >> f", "cat $(which x)", "echo `id`", "ls & rm x",
+                   "find . -delete", "find . -exec rm {} ;", "git checkout main", "git branch -D old", "git push", "sort -o out a.txt",
+                   "uniq in.txt out.txt", "rg --pre ./x foo", "fd -x rm", "cat ~/.ssh/id_rsa", "cat .env", "echo $AWS_SECRET",
+                   "printenv", "/bin/ls", "./script.sh", "FOO=1 ls", "python3 -c 'print(1)'", "curl https://example.com",
+                   "git -c core.pager=x log", "git log --output=x", "ls\nrm x", "ls |", "sudo ls", "xargs rm", "sed -i s/a/b/ f",
+                   String(repeating: "ls ", count: 200), "", "tee out.txt", "ssh host ls"]
+    for c in changes { check(!CommandPolicy.isReadOnly(c), "asks: \(c.prefix(40))") }
+}
+
+suite("questions with options") {
+    let q = [Question(question: "Which DB?", header: "DB", options: [.init(label: "Postgres"), .init(label: "SQLite")]),
+             Question(question: "Extras?", options: [.init(label: "Auth"), .init(label: "Billing"), .init(label: "A, B")], multiSelect: true)]
+    check(Question.validate(["Which DB?": "SQLite", "Extras?": "Auth, Billing"], for: q), "valid answers accepted")
+    check(Question.validate(["Which DB?": "SQLite", "Extras?": "A, B"], for: q), "a label containing a comma is one answer")
+    check(!Question.validate(["Which DB?": "MySQL", "Extras?": "Auth"], for: q), "an option that wasn't offered is refused")
+    check(!Question.validate(["Which DB?": "Postgres, SQLite", "Extras?": "Auth"], for: q), "several answers to a single-choice question refused")
+    check(!Question.validate(["Which DB?": "SQLite"], for: q), "every question must be answered")
+    check(!Question.validate(["Which DB?": "SQLite", "Extras?": "Auth, Auth"], for: q), "duplicate picks refused")
+    check(EventCodec.cleanQuestions([Question(question: "One?", options: [.init(label: "Only")])]) == nil, "fewer than 2 options can't be shown")
+    check(EventCodec.cleanQuestions([Question(question: "Dup?", options: [.init(label: "A"), .init(label: "A")])]) == nil, "duplicate labels can't be shown")
+    check(EventCodec.cleanQuestions([Question(question: "Q\u{202E}?", options: [.init(label: "A\u{0007}"), .init(label: "B")])])?
+            .first.map { $0.question == "Q?" && $0.options[0].label == "A" } == true, "question text is sanitized")
+    let line = #"{"agent":"a","session_id":"s","event":"needs_permission","await_seconds":30,"request":{"id":"r","questions":[{"question":"Pick","options":[{"label":"x"},{"label":"y"}]}]}}"#
+    check((try? decode(line))?.event.request?.isQuestion == true, "questions survive decoding")
+
+    // The socket only delivers answers for the questions that were shown, and never a bare Allow.
+    let dir = tempDir()
+    defer { cleanup(dir) }
+    let server = SocketServer(path: dir + "/q.sock") { _ in ServerReply(ok: true) }
+    try server.start()
+    defer { server.stop() }
+    func waitFor(_ answers: [String: String]?, _ decision: Decision) throws -> (Bool, ServerReply?) {
+        let info = SocketServer.AwaitInfo(sessionKey: "a/s", requestID: "r")
+        final class Box: @unchecked Sendable { var reply: ServerReply? }
+        let box = Box()
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            box.reply = try? SocketClient.request(Data(line.utf8), to: dir + "/q.sock", timeout: 5)
+            done.signal()
+        }
+        usleep(150_000)
+        let ok = server.resolve(info, decision: decision, answers: answers)
+        if !ok { _ = server.resolve(info, decision: .deferred) }
+        done.wait()
+        return (ok, box.reply)
+    }
+    let (ok1, r1) = try waitFor(["Pick": "y"], .allow)
+    check(ok1 && r1?.answers == ["Pick": "y"] && r1?.decision == .allow, "answers delivered with Allow")
+    let (ok2, r2) = try waitFor(["Pick": "z"], .allow)
+    check(!ok2 && r2?.decision == .deferred, "an answer that wasn't offered isn't delivered")
+    let (ok3, _) = try waitFor(nil, .allow)
+    check(!ok3, "a question can't be answered with a bare Allow")
+}
+
 // MARK: - Engine
 
 suite("engine: lifecycle") {
@@ -766,14 +825,33 @@ suite("integrations: Cursor, Gemini CLI, Antigravity config") {
     // Antigravity
     let a1 = IntegrationSetup.connect(.antigravity, ["my-linter": ["PostToolUse": []]], cli: cli, approvals: true)
     let ours = a1[IntegrationSetup.antigravityKey] as? [String: Any] ?? [:]
-    let pre = (ours["PreToolUse"] as? [[String: Any]])?.first
+    let pres = (ours["PreToolUse"] as? [[String: Any]]) ?? []
+    let pre = pres.first { $0["matcher"] as? String == "run_command" }
     let preCmd = ((pre?["hooks"] as? [[String: Any]])?.first?["command"] as? String) ?? ""
-    check(pre?["matcher"] as? String == "run_command" && preCmd.contains("--event PreToolUse") && preCmd.contains("--wait"), "Antigravity approvals: terminal commands only, event named")
+    check(pre != nil && preCmd.contains("--event PreToolUse") && preCmd.contains("--wait"), "Antigravity approvals: terminal commands, event named")
+    check(pres.count == 2 && pres.contains { $0["matcher"] as? String == "ask_question" }, "Antigravity: questions and commands only, nothing else intercepted")
+    let noApprovals = IntegrationSetup.connect(.antigravity, [:], cli: cli)
+    let qOnly = ((noApprovals[IntegrationSetup.antigravityKey] as? [String: Any])?["PreToolUse"] as? [[String: Any]]) ?? []
+    check(qOnly.count == 1 && qOnly[0]["matcher"] as? String == "ask_question" && !IntegrationSetup.approvalsOn(.antigravity, noApprovals),
+          "Antigravity: questions come to AgentBar even with command approvals off")
     check(a1["my-linter"] != nil && IntegrationSetup.approvalsOn(.antigravity, a1), "Antigravity: user's hooks kept")
     let start = (ours["SessionStart"] as? [[String: Any]])?.first
     let post = (ours["PostToolUse"] as? [[String: Any]])?.first
     check(start?["command"] != nil && start?["hooks"] == nil, "Antigravity: SessionStart is a flat handler list (its guide)")
     check(post?["matcher"] as? String == "*" && post?["hooks"] != nil, "Antigravity: PostToolUse grouped with matcher *")
+    // A 1.1.0 connection (commands only, no question hook) is upgraded, keeping approvals and the user's hooks.
+    var old = a1
+    var oldOurs = ours
+    oldOurs["PreToolUse"] = [pre as Any]
+    old[IntegrationSetup.antigravityKey] = oldOurs
+    check(IntegrationSetup.needsUpgrade(.antigravity, old) && !IntegrationSetup.needsUpgrade(.antigravity, a1), "Antigravity: 1.1.0 connection detected as needing an upgrade")
+    let upPath = tempDir() + "/hooks.json"
+    try ClaudeSetup.write(old, to: upPath)
+    check(try IntegrationSetup.upgradeFile(.antigravity, cli: cli, path: upPath), "Antigravity: upgraded in place")
+    let upgraded = try ClaudeSetup.read(upPath)
+    check(!IntegrationSetup.needsUpgrade(.antigravity, upgraded) && IntegrationSetup.approvalsOn(.antigravity, upgraded) && upgraded["my-linter"] != nil,
+          "Antigravity: upgrade adds questions, keeps approvals and the user's hooks")
+    check(try !IntegrationSetup.upgradeFile(.antigravity, cli: cli, path: upPath), "Antigravity: upgrade runs once")
     let a2 = IntegrationSetup.disconnect(.antigravity, a1)
     check(a2[IntegrationSetup.antigravityKey] == nil && a2["my-linter"] != nil, "Antigravity: disconnect removes only ours")
 
@@ -841,12 +919,13 @@ if let cli = ProcessInfo.processInfo.environment["AGENTBAR_CLI"] {
 
         final class Out: @unchecked Sendable { var text = "" }
         let lastOut = Out()
-        func run(_ args: [String], stdin: String? = nil, socket: String? = nil) throws -> Int32 {
+        func run(_ args: [String], stdin: String? = nil, socket: String? = nil, autoAllow: Bool = false) throws -> Int32 {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: cli)
             p.arguments = args
             var env = ProcessInfo.processInfo.environment
             env["AGENTBAR_SOCKET"] = socket ?? path
+            env["AGENTBAR_AUTO_ALLOW_READONLY"] = autoAllow ? "1" : "0"
             p.environment = env
             p.standardError = FileHandle.nullDevice
             let out = Pipe()
@@ -925,6 +1004,57 @@ if let cli = ProcessInfo.processInfo.environment["AGENTBAR_CLI"] {
         let missingCode = try hook(#"{"hook_event_name":"PermissionRequest","session_id":"cc1","tool_name":"Bash","tool_input":{"command":"ls"}}"#, socket: missing)
         check(missingCode == 0 && lastOut.text.isEmpty, "AgentBar not running → exit 0, no decision")
 
+        // AskUserQuestion: the card shows the options; the answer goes back as updatedInput.answers.
+        func answerQuestion(_ id: String, _ answers: [String: String]?, decision: Decision = .allow) {
+            DispatchQueue.global().async {
+                for _ in 0..<300 {
+                    if let request = store.snapshot().sessions["claude-code/cc1"]?.pendingRequest, request.id == id {
+                        if server.resolve(SocketServer.AwaitInfo(sessionKey: "claude-code/cc1", requestID: id), decision: decision,
+                                          shown: request, answers: answers) {
+                            store.resolveRequest(sessionKey: "claude-code/cc1", requestID: id, decision: decision)
+                        }
+                        return
+                    }
+                    usleep(10_000)
+                }
+            }
+        }
+        let askInput = #"{"questions":[{"question":"Which database?","header":"DB","options":[{"label":"Postgres","description":"Relational"},{"label":"SQLite"}],"multiSelect":false},{"question":"Which extras?","header":"Extras","options":[{"label":"Auth"},{"label":"Billing"},{"label":"Search"}],"multiSelect":true}]}"#
+        func ask(_ id: String) throws -> [String: Any]? {
+            _ = try hook(#"{"hook_event_name":"PermissionRequest","session_id":"cc1","cwd":"\#(cwd)","tool_name":"AskUserQuestion","tool_use_id":"\#(id)","tool_input":\#(askInput)}"#)
+            return (try? JSONSerialization.jsonObject(with: Data(lastOut.text.utf8))) as? [String: Any]
+        }
+        answerQuestion("q1", ["Which database?": "SQLite", "Which extras?": "Auth, Search"])
+        let q1 = ((try ask("q1"))?["hookSpecificOutput"] as? [String: Any])?["decision"] as? [String: Any]
+        let q1Input = q1?["updatedInput"] as? [String: Any]
+        check(q1?["behavior"] as? String == "allow" && (q1Input?["answers"] as? [String: String]) == ["Which database?": "SQLite", "Which extras?": "Auth, Search"],
+              "AskUserQuestion: chosen options → allow + updatedInput.answers (\(lastOut.text.prefix(300)))")
+        check((q1Input?["questions"] as? [Any])?.count == 2, "AskUserQuestion: original questions echoed back")
+        answerQuestion("q2", ["Which database?": "MySQL", "Which extras?": "Auth"])
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+            _ = server.resolve(SocketServer.AwaitInfo(sessionKey: "claude-code/cc1", requestID: "q2"), decision: .deferred)
+        }
+        _ = try ask("q2")
+        check(lastOut.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "AskUserQuestion: an option that wasn't offered is refused")
+        answerQuestion("q3", nil, decision: .deferred)
+        _ = try ask("q3")
+        check(lastOut.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "AskUserQuestion: Answer in terminal → no output")
+        _ = try hook(#"{"hook_event_name":"PermissionRequest","session_id":"cc1","cwd":"\#(cwd)","tool_name":"AskUserQuestion","tool_use_id":"q4","tool_input":{"questions":[{"question":"Only one option?","options":[{"label":"Yes"}]}]}}"#)
+        check(lastOut.text.isEmpty && store.snapshot().sessions["claude-code/cc1"]?.pendingRequest == nil
+              && store.snapshot().sessions["claude-code/cc1"]?.message == "Has a question for you in the terminal",
+              "AskUserQuestion: questions AgentBar can't show → asked in the terminal, no card")
+
+        // ExitPlanMode: Approve plan echoes the input; Keep planning denies with a revise message.
+        let planHook = #"{"hook_event_name":"PermissionRequest","session_id":"cc1","cwd":"\#(cwd)","tool_name":"ExitPlanMode","tool_use_id":"PID","tool_input":{"plan":"Plan\n1. Add tests\n2. Ship","planFilePath":"/tmp/p.md"}}"#
+        answerQuestion("p1", nil)
+        _ = try hook(planHook.replacingOccurrences(of: "PID", with: "p1"))
+        let p1 = ((try? JSONSerialization.jsonObject(with: Data(lastOut.text.utf8))) as? [String: Any]).flatMap { ($0["hookSpecificOutput"] as? [String: Any])?["decision"] as? [String: Any] }
+        check(p1?["behavior"] as? String == "allow" && (p1?["updatedInput"] as? [String: Any])?["planFilePath"] as? String == "/tmp/p.md",
+              "ExitPlanMode: Approve plan → allow with the input echoed")
+        answerQuestion("p2", nil, decision: .deny)
+        _ = try hook(planHook.replacingOccurrences(of: "PID", with: "p2"))
+        check(lastOut.text.contains(#""behavior":"deny""#) && lastOut.text.contains("keep planning"), "ExitPlanMode: Keep planning → deny + revise message")
+
         _ = try hook(#"{"hook_event_name":"Notification","session_id":"cc1","cwd":"\#(cwd)","notification_type":"idle_prompt","message":"Claude is waiting for your input"}"#)
         check(store.snapshot().sessions["claude-code/cc1"]?.state == .waiting, "idle notification → needs you")
         _ = try hook(#"{"hook_event_name":"Stop","session_id":"cc1","cwd":"\#(cwd)"}"#)
@@ -932,8 +1062,8 @@ if let cli = ProcessInfo.processInfo.environment["AGENTBAR_CLI"] {
         check(try hook("not json") == 0, "garbage stdin never fails the hook")
 
         // --- other adapters ---
-        func adapter(_ name: String, _ json: String, extra: [String] = [], socket: String? = nil) throws -> Int32 {
-            try run(["hook", name] + extra, stdin: json, socket: socket)
+        func adapter(_ name: String, _ json: String, extra: [String] = [], socket: String? = nil, autoAllow: Bool = false) throws -> Int32 {
+            try run(["hook", name] + extra, stdin: json, socket: socket, autoAllow: autoAllow)
         }
         func answerNext(_ key: String, _ decision: Decision) {
             DispatchQueue.global().async {
@@ -979,6 +1109,14 @@ if let cli = ProcessInfo.processInfo.environment["AGENTBAR_CLI"] {
         _ = try adapter("cursor", "{\(cur),\"hook_event_name\":\"beforeShellExecution\",\"command\":\"ls\"}", extra: ["--wait", "5"], socket: missing)
         check(lastOut.text.contains(#""permission":"ask""#), "Cursor: AgentBar closed → still answers ask (never silent)")
         check(try adapter("cursor", "garbage", extra: ["--wait", "5"]) == 0, "Cursor: garbage input exits 0")
+        // Routine read-only commands pass without a card when "Only ask about commands that change things" is on.
+        _ = try adapter("cursor", "{\(cur),\"hook_event_name\":\"beforeShellExecution\",\"command\":\"git status && ls -la src\"}", extra: ["--wait", "5"], autoAllow: true)
+        check(lastOut.text.contains(#""permission":"allow""#) && store.snapshot().sessions["cursor/cu1"]?.pendingRequest == nil
+              && store.snapshot().sessions["cursor/cu1"]?.recentActivity.last?.text == "Ran git status && ls -la src",
+              "Cursor: read-only command → allowed without a popup, recorded as activity")
+        answerNext("cursor/cu1", .deny)
+        _ = try adapter("cursor", "{\(cur),\"hook_event_name\":\"beforeShellExecution\",\"command\":\"ls > files.txt\"}", extra: ["--wait", "20"], autoAllow: true)
+        check(lastOut.text.contains(#""permission":"deny""#), "Cursor: a command that writes still asks")
         _ = try adapter("cursor", "{\(cur),\"hook_event_name\":\"stop\",\"status\":\"completed\"}")
         check(store.snapshot().sessions["cursor/cu1"]?.state == .finished, "Cursor: stop completed → finished")
         check(store.snapshot().sessions["cursor/cu1"]?.usage.totalTokens == 0, "Cursor: no usage when not reported")
@@ -1012,6 +1150,35 @@ if let cli = ProcessInfo.processInfo.environment["AGENTBAR_CLI"] {
               "Antigravity: the card used its own plain-language summary (toolSummary)")
         _ = try adapter("antigravity", "{\(ag),\"toolCall\":{\"name\":\"run_command\",\"args\":{\"CommandLine\":\"ls\"}},\"stepIdx\":5}", extra: ["--event", "PreToolUse", "--wait", "5"], socket: missing)
         check(lastOut.text.contains(#""decision":"ask""#), "Antigravity: AgentBar closed → ask")
+        // ask_question: the options appear on the card; the answer comes back as the reason, in Antigravity's "A1:" form.
+        let agQ = #""toolCall":{"name":"ask_question","args":{"questions":[{"question":"Which color theme do you prefer?","options":["Modern Dark","Clean Light","Vibrant Neon"],"is_multi_select":false},{"question":"Which pages?","options":["Home","Pricing"],"is_multi_select":true}],"toolSummary":"Ask about theme"}}"#
+        DispatchQueue.global().async {
+            for _ in 0..<400 {
+                if let request = store.snapshot().sessions["antigravity/ag1"]?.pendingRequest, request.isQuestion {
+                    if server.resolve(SocketServer.AwaitInfo(sessionKey: "antigravity/ag1", requestID: request.id), decision: .allow, shown: request,
+                                      answers: ["Which color theme do you prefer?": "Clean Light", "Which pages?": "Home, Pricing"]) {
+                        store.resolveRequest(sessionKey: "antigravity/ag1", requestID: request.id, decision: .allow)
+                    }
+                    return
+                }
+                usleep(10_000)
+            }
+        }
+        _ = try adapter("antigravity", "{\(ag),\(agQ)}", extra: ["--event", "PreToolUse", "--wait", "20"])
+        let agAnswer = (try? JSONSerialization.jsonObject(with: Data(lastOut.text.utf8))) as? [String: Any]
+        check(agAnswer?["decision"] as? String == "deny" && (agAnswer?["reason"] as? String)?.contains("A1: Clean Light\nA2: Home, Pricing") == true,
+              "Antigravity question: answer returned as A1/A2 lines (\(lastOut.text.prefix(200)))")
+        answerNext("antigravity/ag1", .deferred)
+        _ = try adapter("antigravity", "{\(ag),\(agQ)}", extra: ["--event", "PreToolUse", "--wait", "20"])
+        check(lastOut.text.contains(#""decision":"allow""#), "Antigravity question: Answer in Antigravity → it asks in its own window")
+        _ = try adapter("antigravity", "{\(ag),\(agQ)}", extra: ["--event", "PreToolUse", "--wait", "5"], socket: missing)
+        check(lastOut.text.contains(#""decision":"allow""#), "Antigravity question: AgentBar closed → it asks in its own window")
+        _ = try adapter("antigravity", "{\(ag),\"hookEventName\":\"PostToolUse\",\(agQ)}")
+        check(store.snapshot().sessions["antigravity/ag1"]?.recentActivity.last?.text == "Asked you: Which color theme do you prefer?",
+              "Antigravity question: listed as a task")
+        _ = try adapter("antigravity", "{\(ag),\"toolCall\":{\"name\":\"run_command\",\"args\":{\"CommandLine\":\"cat package.json | grep version\"}},\"stepIdx\":7}", extra: ["--event", "PreToolUse", "--wait", "5"], autoAllow: true)
+        check(lastOut.text.contains(#""decision":"allow""#) && store.snapshot().sessions["antigravity/ag1"]?.pendingRequest == nil,
+              "Antigravity: read-only command → allowed without a popup")
         _ = try adapter("antigravity", "{\(ag),\"hookEventName\":\"PostToolUse\",\"toolCall\":{\"name\":\"run_command\",\"args\":{\"CommandLine\":\"ls\"}},\"stepIdx\":6}")
         check(lastOut.text.trimmingCharacters(in: .whitespacesAndNewlines) == "{}", "Antigravity: observing events answer {}")
         _ = try adapter("antigravity", "{\(ag),\"hookEventName\":\"Stop\",\"executionNum\":1,\"terminationReason\":\"NO_TOOL_CALL\",\"error\":\"\",\"fullyIdle\":true}")

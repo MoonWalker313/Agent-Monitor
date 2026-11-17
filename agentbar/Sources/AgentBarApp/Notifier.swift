@@ -78,8 +78,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         content.title = title
         content.subtitle = request.summary ?? request.tool ?? "Permission requested"
         let detail = request.detail ?? ""
-        let fitsInline = !detail.contains("\n") && detail.count <= Self.maxInlineDetail
-        content.body = detail.isEmpty ? "Open AgentBar to review" : (fitsInline ? detail : "\(detail.prefix(80))… Choose Review to see all of it.")
+        // Questions and plans are answered on the card (options, the full plan); never with a bare Allow.
+        let needsCard = request.isQuestion || request.tool == "ExitPlanMode"
+        let fitsInline = !needsCard && !detail.contains("\n") && detail.count <= Self.maxInlineDetail
+        if request.isQuestion {
+            content.body = "Choose Review to pick an answer."
+        } else {
+            content.body = detail.isEmpty ? "Open AgentBar to review" : (fitsInline ? detail : "\(detail.prefix(80))… Choose Review to see all of it.")
+        }
         content.sound = .default
         content.categoryIdentifier = fitsInline ? ID.categoryShort : ID.categoryLong
         content.userInfo = ["session": sessionKey, "request": request.id]

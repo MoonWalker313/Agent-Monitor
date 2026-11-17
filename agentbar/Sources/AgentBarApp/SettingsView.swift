@@ -12,12 +12,25 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Permission requests", isOn: $settings.notifyPermission)
-                Toggle("Questions and waiting for your next message", isOn: $settings.notifyNeedsInput)
+                Toggle("Show a popup when an agent needs a decision", isOn: $settings.showPopup)
+                Toggle("Post a banner instead when the popup is off", isOn: $settings.notifyPermission)
+                    .disabled(settings.showPopup)
+                Toggle("Only ask about commands that change things", isOn: $settings.autoAllowReadOnly)
+            } header: {
+                Text("Decisions")
+            } footer: {
+                Text("A popup appears only when an agent needs you to decide: a permission, a question with options, or a plan to approve. Cursor and Antigravity check every terminal command with AgentBar; with the last option on, read-only ones such as ls, cat or git status run without asking and are listed as activity.")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Section {
+                Toggle("Waiting for your next message", isOn: $settings.notifyNeedsInput)
                 Toggle("Finished tasks", isOn: $settings.notifyFinished)
                 Toggle("Errors and agents that may be stuck", isOn: $settings.notifyProblems)
                 Toggle("Daily spending or token limit reached", isOn: $settings.notifyLimits)
-                Toggle("Show a popup for permission requests", isOn: $settings.showPopup)
                 LabeledContent("macOS notifications") {
                     HStack(spacing: 8) {
                         Text(model.notificationStatus).foregroundStyle(.secondary)
@@ -27,10 +40,13 @@ struct SettingsView: View {
                     }
                 }
             } header: {
-                Text("Alerts")
+                Text("Other banners")
             } footer: {
-                Text("Requests always appear in the menu bar, even with alerts off. Repeats from the same agent are grouped so you get at most one alert every 30 seconds.")
+                Text("Everything agents do is tracked in the menu bar either way. Turn these on to also get a macOS banner (at most one per agent every 30 seconds).")
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Section {

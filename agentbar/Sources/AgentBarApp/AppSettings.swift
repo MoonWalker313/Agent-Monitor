@@ -13,6 +13,9 @@ final class AppSettings: ObservableObject {
     @Published var notifyProblems: Bool { didSet { save("notifyProblems", notifyProblems) } }
     @Published var notifyLimits: Bool { didSet { save("notifyLimits", notifyLimits) } }
     @Published var showPopup: Bool { didSet { save("showPopup", showPopup) } }
+    /// Cursor and Antigravity ask before every command; let read-only ones (ls, git status…) through
+    /// without a popup. Read by the `agentbar` hooks too (CommandPolicy.autoAllowEnabled).
+    @Published var autoAllowReadOnly: Bool { didSet { save(CommandPolicy.preferenceKey, autoAllowReadOnly) } }
 
     // Timing (minutes)
     @Published var stuckMinutes: Int { didSet { save("stuckMinutes", stuckMinutes) } }
@@ -40,11 +43,14 @@ final class AppSettings: ObservableObject {
         func bool(_ key: String, _ fallback: Bool) -> Bool { defaults.object(forKey: key) as? Bool ?? fallback }
         func int(_ key: String, _ fallback: Int) -> Int { defaults.object(forKey: key) as? Int ?? fallback }
         notifyPermission = bool("notifyPermission", true)
-        notifyNeedsInput = bool("notifyNeedsInput", true)
-        notifyFinished = bool("notifyFinished", true)
-        notifyProblems = bool("notifyProblems", true)
+        // Popups and banners are for decisions. Status changes are tracked in the menu bar; these
+        // banners are opt-in (Settings › Alerts).
+        notifyNeedsInput = bool("notifyNeedsInput", false)
+        notifyFinished = bool("notifyFinished", false)
+        notifyProblems = bool("notifyProblems", false)
         notifyLimits = bool("notifyLimits", true)
         showPopup = bool("showPopup", true)
+        autoAllowReadOnly = bool(CommandPolicy.preferenceKey, true)
         stuckMinutes = int("stuckMinutes", 10)
         quietMinutes = int("quietMinutes", 60)
         dailyCostLimit = defaults.object(forKey: "dailyCostLimit") as? Double ?? 0

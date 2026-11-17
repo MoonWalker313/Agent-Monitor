@@ -25,7 +25,7 @@ Only processes running as the same macOS user can connect. There is no network p
 | `open_url` | string | no | What to open when the user clicks the session. Allowed schemes: `https`, `vscode`, `vscode-insiders`, `cursor`, `windsurf`, `zed`, `jetbrains`, `iterm2`, `warp`, `x-github-client`. Never `file:`, `javascript:`, `data:`, `http:`, or URLs with credentials. |
 | `activate_bundle_id` | string | no | App to bring to the front, e.g. `com.googlecode.iterm2`. |
 | `activity` | string | no | What the agent just did ("Edited Checkout.swift"). The last 20 are kept as the session's *Tasks* (click a session to see them); the request card shows the latest 3. Max 120. |
-| `request` | object | no | Only with `needs_permission` **and** `await_seconds`. `{ "id": str (required), "tool": str, "summary": str, "detail": str }`. Shown as a card with **Allow / Deny**. `detail` (the exact command, file or URL) keeps line breaks, up to 2,000 characters / 40 lines. Without `await_seconds` it's shown as a plain message, since no answer could reach the agent. Once shown, a request's content can't be changed by later events with the same `id`. |
+| `request` | object | no | Only with `needs_permission` **and** `await_seconds`. `{ "id": str (required), "tool": str, "summary": str, "detail": str, "questions": [...] }`. Shown as a card with **Allow / Deny**, or, with `questions`, with the options to pick from (see *Questions*). `detail` (the exact command, file or URL) keeps line breaks, up to 2,000 characters / 40 lines. Without `await_seconds` it's shown as a plain message, since no answer could reach the agent. Once shown, a request's content can't be changed by later events with the same `id`. |
 | `await_seconds` | int | no | With `request`: keep the connection open and reply with the user's decision (see *Permission decisions*). 1–600. |
 | `usage` | object | no | `{ "input_tokens": int, "output_tokens": int, "cost_usd": number }`. **Deltas** since your last report; AgentBar sums them. Non-negative, at most 10M tokens / $1,000 per event. |
 
@@ -69,6 +69,7 @@ one reply line when there's an answer:
 {"ok":true,"decision":"allow"}
 {"ok":true,"decision":"deny","decision_message":"The user denied this from AgentBar."}
 {"ok":true,"decision":"defer"}
+{"ok":true,"decision":"allow","answers":{"Which database?":"SQLite"}}   (a request with questions)
 ```
 
 Only one connection can wait on a given request `id`; a second one is refused.
@@ -86,3 +87,22 @@ early withdraws the request (the card disappears).
 ## Privacy
 
 Everything stays on your Mac, in `~/Library/Application Support/AgentBar/agentbar.sqlite` (file mode `0600`). The event log keeps only the event kind and time; titles, messages and paths are kept only on the session's current row. History is deleted after 30 days, or right away with **Clear**.
+
+## Questions
+
+For a decision with options, add `questions` to the `request` (1–4 questions):
+
+```json
+{"agent":"my-agent","session_id":"7","event":"needs_permission","await_seconds":120,
+ "request":{"id":"q1","summary":"Which database?","questions":[
+   {"question":"Which database?","header":"DB","multiSelect":false,
+    "options":[{"label":"Postgres","description":"Relational"},{"label":"SQLite"}]}]}}
+```
+
+Each question needs a unique `question` (max 300 characters) and 2–6 unique option `label`s (max 120);
+`header` and `description` are optional. Malformed questions are dropped with a warning and the card
+falls back to Allow / Deny. The user picks options and presses **Send answer**; the reply is `allow`
+with `answers`, mapping each question to the chosen label (several labels joined with `", "` when
+`multiSelect` is true). AgentBar only sends answers that are options it showed, and never answers a
+question with a bare `allow`; `deny` means the user chose not to answer, `defer` that they'll answer
+in the agent's own window.

@@ -75,6 +75,10 @@ final class AppModel: ObservableObject {
                                                           queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.didWake() }
         }
+        // Connections from older versions miss newer hooks (Antigravity questions, 1.2.0): update ours in place.
+        if FileManager.default.isExecutableFile(atPath: bundledCLI) {
+            for i in Integration.allCases { _ = try? IntegrationSetup.upgradeFile(i, cli: bundledCLI) }
+        }
         refreshClaudeStatus()
     }
 
@@ -151,7 +155,9 @@ final class AppModel: ObservableObject {
                 if !announcedRequests.contains(key) {
                     announcedRequests.insert(key)
                     newRequest = true
-                    if settings.notifyPermission {
+                    // The popup already shows this decision; a banner too would be a second popup.
+                    // Banners stand in when the popup is off.
+                    if settings.notifyPermission && !settings.showPopup {
                         Notifier.shared.postPermission(sessionKey: change.session.id, request: request,
                                                        title: "\(Format.project(change.session)) needs your permission")
                     }
@@ -226,7 +232,7 @@ final class AppModel: ObservableObject {
     // MARK: Permission decisions
 
     /// Allow / Deny / Answer-in-terminal from the panel, the popup, or a notification.
-    func decide(sessionKey: String, requestID: String, decision: Decision) {
+    func decide(sessionKey: String, requestID: String, decision: Decision, answers: [String: String]? = nil) {
         let info = SocketServer.AwaitInfo(sessionKey: sessionKey, requestID: requestID)
         // Answer only the request exactly as it was shown.
         let shown = store.snapshot().sessions[sessionKey]?.pendingRequest
@@ -234,9 +240,15 @@ final class AppModel: ObservableObject {
             decisionNote = "That request is no longer open."
             return
         }
+        if let questions = shown?.questions, !questions.isEmpty, decision == .allow {
+            guard let answers, Question.validate(answers, for: questions) else {
+                decisionNote = "Pick an answer for each question."
+                return
+            }
+        }
         let delivered = server?.resolve(info, decision: decision,
                                         message: decision == .deny ? "The user denied this from AgentBar." : nil,
-                                        shown: shown) ?? false
+                                        shown: shown, answers: decision == .allow ? answers : nil) ?? false
         if delivered {
             store.resolveRequest(sessionKey: sessionKey, requestID: requestID, decision: decision)
             decisionNote = nil

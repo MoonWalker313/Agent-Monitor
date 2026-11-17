@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0 (2026-11-17)
+
+**Popups only when you need to decide.** Everything agents do is still tracked in the menu bar.
+
+- **Questions with options.** When Claude Code or Antigravity asks you a multiple-choice question, the popup shows the options; pick one (or several) and press **Send answer**, and the agent carries on. Previously Claude Code's questions showed a plain Allow, which couldn't answer them, and Antigravity's didn't reach AgentBar. *Answer in terminal* / *Answer in Antigravity*, or no answer within the wait, lets the agent ask in its own window as before. Cursor doesn't give hooks access to its questions, so those still appear only in Cursor.
+- Antigravity connections from 1.1.0 are updated automatically when AgentBar starts (your approvals setting and other hooks are kept; a backup is saved). Restart open Antigravity chats.
+- **Plans.** When Claude Code finishes planning, the popup shows the plan with **Approve plan** and **Keep planning**.
+- **Routine commands don't ask.** Cursor and Antigravity check every terminal command with AgentBar. With the new setting *Only ask about commands that change things* (on by default), read-only commands such as `ls`, `cat`, `grep` or `git status` run without a popup and are listed as activity. Anything that writes, installs, deletes, uses variables or substitutions, or reads credential files (`.ssh`, `.env`, tokens…) still asks.
+- **Fewer banners.** Banners for finished tasks, "waiting for your next message", and errors are now off by default (Settings › Alerts › Other banners). A decision shows the popup only, not a popup and a banner; a banner stands in when the popup is off.
+
 ## 1.1.0 (2026-11-17)
 
 **Cursor, Gemini CLI and Antigravity**, one click each in Settings → Agents (and the setup guide):

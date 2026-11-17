@@ -188,14 +188,21 @@ public final class SocketServer: @unchecked Sendable {
     /// or if `shown` (what the user saw) isn't exactly what that agent asked for.
     @discardableResult
     public func resolve(_ info: AwaitInfo, decision: Decision, message: String? = nil,
-                        shown: PermissionRequestInfo? = nil) -> Bool {
+                        shown: PermissionRequestInfo? = nil, answers: [String: String]? = nil) -> Bool {
         queue.sync {
             guard let client = awaiting[info] else { return false }
             if let shown, client.awaitedRequest != shown { return false }
+            // Answers only go with Allow, and only if they pick options the agent actually offered.
+            if let answers {
+                guard decision == .allow, let questions = client.awaitedRequest?.questions,
+                      Question.validate(answers, for: questions) else { return false }
+            } else if decision == .allow, client.awaitedRequest?.isQuestion == true {
+                return false // a question is answered by picking options, never by a bare Allow
+            }
             awaiting[info] = nil
             client.awaiting = nil
             let delivered = reply(ServerReply(ok: true, warnings: client.awaitWarnings.isEmpty ? nil : client.awaitWarnings,
-                                              decision: decision, decisionMessage: message), to: client)
+                                              decision: decision, decisionMessage: message, answers: answers), to: client)
             drop(client)
             return delivered
         }

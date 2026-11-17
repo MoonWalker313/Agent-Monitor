@@ -41,12 +41,63 @@ public struct PermissionRequestInfo: Codable, Equatable, Sendable {
     public var summary: String?
     /// The exact thing being approved (command, file path, URL…). Shown in full, monospaced.
     public var detail: String?
+    /// Multiple-choice questions (e.g. Claude Code's AskUserQuestion). When present, the card shows
+    /// the options instead of Allow, and the answer is sent back as `answers`.
+    public var questions: [Question]?
 
-    public init(id: String, tool: String? = nil, summary: String? = nil, detail: String? = nil) {
+    public init(id: String, tool: String? = nil, summary: String? = nil, detail: String? = nil,
+                questions: [Question]? = nil) {
         self.id = id
         self.tool = tool
         self.summary = summary
         self.detail = detail
+        self.questions = questions
+    }
+
+    /// A question to answer by picking options, not a yes/no permission.
+    public var isQuestion: Bool { !(questions ?? []).isEmpty }
+}
+
+/// One multiple-choice question an agent asks the user.
+public struct Question: Codable, Equatable, Sendable {
+    public var question: String
+    /// A short label for the question ("Framework").
+    public var header: String?
+    public var options: [Option]
+    /// The user may pick several options; they're sent back joined with ", ".
+    public var multiSelect: Bool?
+
+    public struct Option: Codable, Equatable, Sendable {
+        public var label: String
+        public var description: String?
+        public init(label: String, description: String? = nil) {
+            self.label = label
+            self.description = description
+        }
+    }
+
+    public init(question: String, header: String? = nil, options: [Option], multiSelect: Bool? = nil) {
+        self.question = question
+        self.header = header
+        self.options = options
+        self.multiSelect = multiSelect
+    }
+
+    public var allowsMany: Bool { multiSelect == true }
+
+    /// Checks that `answers` gives every question exactly options it offered (question text → labels
+    /// joined with ", "). Used before an answer is sent, so nothing but a shown option can be chosen.
+    public static func validate(_ answers: [String: String], for questions: [Question]) -> Bool {
+        guard !questions.isEmpty, answers.count == questions.count else { return false }
+        for q in questions {
+            guard let answer = answers[q.question] else { return false }
+            let labels = Set(q.options.map(\.label))
+            if labels.contains(answer) { continue } // a single label (may itself contain ", ")
+            guard q.allowsMany else { return false }
+            let picked = answer.components(separatedBy: ", ")
+            guard !picked.isEmpty, Set(picked).count == picked.count, picked.allSatisfy(labels.contains) else { return false }
+        }
+        return true
     }
 }
 
@@ -121,14 +172,17 @@ public struct ServerReply: Codable, Equatable, Sendable {
     public var decision: Decision?
     /// For `deny`: text to pass back to the agent.
     public var decisionMessage: String?
+    /// For `allow` on a request with questions: question text → chosen option label(s), joined with ", ".
+    public var answers: [String: String]?
 
     enum CodingKeys: String, CodingKey {
-        case ok, error, warnings, running, waiting, decision
+        case ok, error, warnings, running, waiting, decision, answers
         case decisionMessage = "decision_message"
     }
 
     public init(ok: Bool, error: String? = nil, warnings: [String]? = nil, running: Int? = nil, waiting: Int? = nil,
-                decision: Decision? = nil, decisionMessage: String? = nil) {
+                decision: Decision? = nil, decisionMessage: String? = nil, answers: [String: String]? = nil) {
+        self.answers = answers
         self.ok = ok
         self.error = error
         self.warnings = warnings
@@ -243,6 +297,11 @@ public enum EventCodec {
             request.summary = cleanOptional(request.summary, max: maxMessageLength)
             request.detail = request.detail.map { Sanitizer.cleanMultiline($0, maxLength: maxDetailLength) }
                 .flatMap { $0.isEmpty ? nil : $0 }
+            if let questions = request.questions {
+                let cleaned = cleanQuestions(questions)
+                if cleaned == nil { warnings.append("questions dropped: each needs a unique question and 2–\(maxOptions) unique options") }
+                request.questions = cleaned
+            }
             if request.id.isEmpty {
                 event.request = nil; warnings.append("request dropped: missing id")
             } else if event.event != .needsPermission {
@@ -277,6 +336,32 @@ public enum EventCodec {
             }
         }
         return DecodedEvent(event: event, date: date, warnings: warnings)
+    }
+
+    public static let maxQuestions = 4
+    public static let maxOptions = 6
+    public static let maxQuestionLength = 300
+    public static let maxOptionLength = 120
+
+    /// Cleans questions the same way everywhere (the hook uses this too, to match answers to what it
+    /// asked). Returns nil if anything is malformed: the card then falls back to plain Allow/Deny text.
+    public static func cleanQuestions(_ questions: [Question]) -> [Question]? {
+        guard !questions.isEmpty, questions.count <= maxQuestions else { return nil }
+        var result: [Question] = []
+        for q in questions {
+            let text = Sanitizer.clean(q.question, maxLength: maxQuestionLength)
+            let options = q.options.map {
+                Question.Option(label: Sanitizer.clean($0.label, maxLength: maxOptionLength),
+                                description: cleanOptional($0.description, max: maxQuestionLength))
+            }
+            let labels = options.map(\.label)
+            guard !text.isEmpty, (2...maxOptions).contains(options.count), !labels.contains(""),
+                  Set(labels).count == labels.count else { return nil }
+            result.append(Question(question: text, header: cleanOptional(q.header, max: maxToolLength),
+                                   options: options, multiSelect: q.multiSelect == true ? true : nil))
+        }
+        guard Set(result.map(\.question)).count == result.count else { return nil }
+        return result
     }
 
     private static func cleanOptional(_ value: String?, max: Int) -> String? {

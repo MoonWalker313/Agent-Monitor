@@ -33,6 +33,7 @@ AI agents stop and wait: for a permission, an answer, a review. When you run sev
 
 - **One glance:** a lamp in the menu bar shows whether anything needs you, with a count.
 - **Answer permission requests where you are.** Each request says what the agent wants in plain words, shows the **exact command**, and lists what it did just before. Then: **Allow**, **Deny**, or **Answer in terminal**, from the panel, a floating popup, or the notification.
+- **Popups only for decisions.** A popup appears when an agent needs you: a permission, a **question with options** (pick and send, for Claude Code and Antigravity), or a **plan to approve** (Claude Code). Routine read-only commands such as `ls` or `git status` from Cursor and Antigravity don't ask; they're listed as activity.
 - **Every agent, grouped by what it needs from you:** Needs you, Running, Done today. Click an agent to see its tasks (the last 20) and details.
 - **Notices problems:** a running agent that goes quiet is marked *may be stuck*; one that needs you but stays silent for an hour is retired automatically. Errors alert you.
 - **Today at a glance:** sessions, tasks done, how long agents waited on you, tokens and cost (when the agent reports them), with optional daily limits.
@@ -66,12 +67,12 @@ On first launch a short **setup guide** opens:
 2. **Open at login**: agents can only reach AgentBar while it's running.
 3. **Connect your agents:** click **Connect** next to each one you use. AgentBar adds its hooks to that tool's settings file, keeps your other settings, and saves a backup. Restart open sessions afterwards.
 
-   | | Sessions and tasks | Knows it's waiting for you | Allow / Deny in AgentBar |
-   |---|---|---|---|
-   | Claude Code | ✅ | ✅ | ✅ |
-   | Cursor | ✅ | — | ✅ terminal commands (opt-in) |
-   | Gemini CLI | ✅ | ✅ | — (answer in Gemini) |
-   | Antigravity | ✅ | — | ✅ terminal commands (opt-in) |
+   | | Sessions and tasks | Knows it's waiting for you | Allow / Deny in AgentBar | Questions with options |
+   |---|---|---|---|---|
+   | Claude Code | ✅ | ✅ | ✅ | ✅ (and plan approval) |
+   | Cursor | ✅ | — | ✅ terminal commands (opt-in) | — (answer in Cursor) |
+   | Gemini CLI | ✅ | ✅ | — (answer in Gemini) | — |
+   | Antigravity | ✅ | — | ✅ terminal commands (opt-in) | ✅ |
 
    - **Anything else:** click **Install** for the `agentbar` command, then run your agent or script through it:
      ```bash
@@ -116,7 +117,7 @@ Details, threat model and how to report a problem: **[SECURITY.md](SECURITY.md)*
 
 <p align="center"><img src="docs/images/settings-light.png" width="420" alt="Settings: alert toggles, stuck and silence timers, daily limits, history length, agents"></p>
 
-Alerts per type (permission, questions, finished, errors and stuck, daily limits), the request popup, *may be stuck* timer (5–60 min), silence timer (30 min–8 h), daily spending and token limits, history length, open at login, and agent connections.
+The decision popup (or a banner instead), *only ask about commands that change things*, optional banners (waiting for your next message, finished, errors and stuck, daily limits), *may be stuck* timer (5–60 min), silence timer (30 min–8 h), daily spending and token limits, history length, open at login, and agent connections.
 
 ## Building from source
 
