@@ -1,0 +1,122 @@
+{
+  "name": "Standby, Go",
+  "platform": "macos",
+  "source": "Sources/AgentBarApp/Theme.swift",
+  "color": {
+    "panel": {
+      "light": "#F2F1EE",
+      "dark": "#161618"
+    },
+    "cue": {
+      "light": "#FFFFFF",
+      "dark": "#232326"
+    },
+    "cueHover": {
+      "light": "#F7F6F3",
+      "dark": "#2B2B2F"
+    },
+    "standby": {
+      "light": "#FFF6E3",
+      "dark": "#251E11"
+    },
+    "standbyEdge": {
+      "light": "#E8B65A",
+      "dark": "#7A5A1C"
+    },
+    "hairline": {
+      "light": "#DEDBD4",
+      "dark": "#343438"
+    },
+    "unlit": {
+      "light": "#B9B6AF",
+      "dark": "#4A4A4E"
+    },
+    "go": {
+      "light": "#1F7A36",
+      "dark": "#248A3D"
+    },
+    "ink": {
+      "light": "#1D1D1F",
+      "dark": "#F2F2F7"
+    },
+    "inkSecondary": {
+      "light": "#5F5E63",
+      "dark": "#A8A8AD"
+    },
+    "inkTertiary": {
+      "light": "#77767B",
+      "dark": "#8E8E93"
+    },
+    "tape": {
+      "light": "#E4E0D7",
+      "dark": "#3A3A3D"
+    },
+    "tapeInk": {
+      "light": "#47443D",
+      "dark": "#D6D6DB"
+    },
+    "script": {
+      "light": "#F8F3E7",
+      "dark": "#0F0F10"
+    },
+    "scriptInk": {
+      "light": "#4F3800",
+      "dark": "#FFD58A"
+    },
+    "amber": {
+      "light": "#F0A01C",
+      "dark": "#FFB020"
+    },
+    "amberInk": {
+      "light": "#8A5600",
+      "dark": "#FFC14D"
+    },
+    "blue": {
+      "light": "#0A7AFF",
+      "dark": "#0A84FF"
+    },
+    "blueInk": {
+      "light": "#0060CC",
+      "dark": "#5EAEFF"
+    },
+    "green": {
+      "light": "#2DB653",
+      "dark": "#30D158"
+    },
+    "greenInk": {
+      "light": "#1C7A37",
+      "dark": "#5EDB7F"
+    },
+    "red": {
+      "light": "#E5372B",
+      "dark": "#FF453A"
+    },
+    "redInk": {
+      "light": "#C0261B",
+      "dark": "#FF7A70"
+    }
+  },
+  "type": {
+    "font": "SF Pro (system)",
+    "mono": "SF Mono",
+    "scale": {
+      "requestHeadline": 15,
+      "project": 13,
+      "body": 12,
+      "caption": 11,
+      "tape": 10
+    }
+  },
+  "radius": {
+    "card": 10,
+    "group": 8,
+    "button": 7,
+    "script": 6,
+    "tape": 2
+  },
+  "motion": {
+    "lampBreath": "1.4s easeInOut, off under Reduce Motion",
+    "goFlash": "180ms",
+    "fold": "200ms easeOut"
+  }
+}

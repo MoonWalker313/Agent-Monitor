@@ -1,0 +1,26 @@
+AgentBar: first launch
+======================
+
+1. Drag AgentBar into the Applications folder.
+
+2. Open it once. AgentBar isn't notarized by Apple, so macOS says it
+   "could not verify AgentBar is free of malware". That's expected.
+   Approve it once:
+
+   macOS 13 Ventura and 14 Sonoma
+     • In Applications, Control-click (or right-click) AgentBar, choose Open, then Open.
+
+   macOS 15 Sequoia and later
+     • Double-click AgentBar. macOS blocks it; click Done.
+     • Open System Settings > Privacy & Security.
+     • Scroll to "AgentBar was blocked", click Open Anyway, and enter your password.
+
+   In Terminal, instead:
+     xattr -dr com.apple.quarantine /Applications/AgentBar.app
+
+3. AgentBar appears in the menu bar (top right of your screen) and opens
+   a short setup guide: allow alerts, open at login, connect Claude Code,
+   and try a sample request.
+
+Check your download: run  shasum -a 256 AgentBar-*.dmg  and compare it with
+SHA256SUMS.txt published next to the download.

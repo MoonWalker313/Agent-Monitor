@@ -1,0 +1,33 @@
+# Builds and publishes AgentBar when a version tag (v1.2.3) is pushed.
+# The tag must match the VERSION file. No Apple Developer account or secrets needed beyond GITHUB_TOKEN.
+name: Release
+on:
+  push:
+    tags: ["v*.*.*"]
+permissions:
+  contents: write
+defaults:
+  run:
+    working-directory: agentbar   # the app lives in agentbar/; docs (PRD, plan) sit at the repo root
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches VERSION
+        run: |
+          test "v$(tr -d '[:space:]' < VERSION)" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME doesn't match VERSION $(cat VERSION)"; exit 1; }
+      - name: Install dmgbuild
+        run: python3 -m venv .build-tools && .build-tools/bin/pip install dmgbuild==1.6.2
+      - name: Build, test and package (universal, ad-hoc signed)
+        run: scripts/build-dmg.sh
+      - name: Release notes from CHANGELOG
+        run: |
+          awk -v v="$(cat VERSION | tr -d '[:space:]')" '$0 ~ "^## "v" " {f=1; next} /^## / && f {exit} f' CHANGELOG.md > dist/notes.md
+          test -s dist/notes.md || { echo "No CHANGELOG entry for this version"; exit 1; }
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/AgentBar-*.dmg dist/SHA256SUMS.txt \
+            --title "AgentBar ${GITHUB_REF_NAME#v}" --notes-file dist/notes.md

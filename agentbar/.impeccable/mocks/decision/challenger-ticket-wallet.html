@@ -1,0 +1,37 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Ticket Wallet</title><style>
+*{box-sizing:border-box;margin:0}
+body{width:400px;height:680px;overflow:hidden;font:13px -apple-system,BlinkMacSystemFont,sans-serif;color:#1B2A52;background:#e9ebf0}
+.panel{margin:8px;height:664px;border-radius:12px;background:#f4f5f8;box-shadow:0 0 0 .5px rgba(0,0,0,.18),0 12px 32px rgba(0,0,0,.18);padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.head{display:flex;justify-content:space-between;align-items:center;background:#1B2A52;color:#fff;margin:-12px -14px 0;padding:10px 14px;border-radius:12px 12px 0 0}
+.head b{letter-spacing:.06em;font-size:12px}.head span{font-size:11px;opacity:.8}
+.coupon{background:#fff;border-radius:8px;border:1px solid #c9cedb;padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;position:relative}
+.coupon:after{content:"";position:absolute;left:-1px;right:-1px;bottom:44px;border-top:1.5px dashed #c9cedb}
+.f{border:1px solid #d6dae4;border-radius:4px;padding:5px 7px}
+.f .l{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:#6b7591}
+.f .v{font-size:12px;font-weight:600;color:#5B4B8A}
+.wide{grid-column:1/3}
+.cmd{font:12px "SF Mono",Menlo,monospace;color:#5B4B8A}
+.ask{grid-column:1/3;font-size:15px;font-weight:600}
+.btns{grid-column:1/3;display:flex;gap:8px;justify-content:flex-end;padding-top:14px}
+.btn{border-radius:6px;padding:5px 16px;font-size:13px;background:#fff;box-shadow:0 0 0 .5px rgba(0,0,0,.25)}
+.btn.p{background:#1B2A52;color:#fff}
+.stub{background:#fff;border:1px solid #d6dae4;border-radius:6px;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;font-size:12px}
+.stamp{font-size:10px;font-weight:800;letter-spacing:.08em;border:1.5px solid;border-radius:3px;padding:1px 5px;transform:rotate(-4deg)}
+.ok{color:#1f8a4c}.no{color:#D7263D}.run{color:#2c5fd1}
+.lab{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#6b7591;margin-top:4px}
+</style></head><body><div class="panel">
+<div class="head"><b>AGENTBAR</b><span>1 needs you · 2 running</span></div>
+<div class="coupon">
+<div class="ask">Delete node_modules and reinstall dependencies?</div>
+<div class="f"><div class="l">Agent</div><div class="v">Claude Code</div></div>
+<div class="f"><div class="l">Project</div><div class="v">shop</div></div>
+<div class="f wide"><div class="l">Exact command</div><div class="cmd">rm -rf node_modules &amp;&amp; npm install</div></div>
+<div class="f wide"><div class="l">Before this</div><div class="v" style="font-weight:400;color:#1B2A52">Read package.json · Edited package.json</div></div>
+<div class="btns"><span class="btn">Deny</span><span class="btn p">Allow</span></div>
+</div>
+<div class="lab">Today</div>
+<div class="stub"><span>api-server · Run tests</span><span class="stamp ok">ALLOWED</span></div>
+<div class="stub"><span>blog draft · Fetch example.com</span><span class="stamp no">DENIED</span></div>
+<div class="stub"><span>api-server · Running</span><span class="stamp run">IN FLIGHT</span></div>
+<div class="stub"><span>docs · Finished</span><span class="stamp ok">ARRIVED</span></div>
+</div></body></html>

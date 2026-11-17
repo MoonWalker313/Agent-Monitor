@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Canon</title><style>
+*{box-sizing:border-box;margin:0}
+body{width:400px;height:680px;overflow:hidden;font:13px -apple-system,BlinkMacSystemFont,sans-serif;color:#1d1d1f;background:#dcdcdf}
+.panel{margin:8px;height:664px;border-radius:12px;background:rgba(236,236,236,.95);box-shadow:0 0 0 .5px rgba(0,0,0,.2),0 12px 32px rgba(0,0,0,.2);padding:12px;display:flex;flex-direction:column;gap:10px}
+.h{font-weight:600}.s{font-size:11px;color:#6e6e73}
+.group{background:#fff;border-radius:8px;overflow:hidden}
+.row{display:flex;gap:10px;align-items:center;padding:9px 10px;border-bottom:.5px solid #e2e2e2}
+.dot{width:8px;height:8px;border-radius:4px}
+.row b{font-weight:500}.row span{margin-left:auto;font-size:11px;color:#8e8e93}
+.req{padding:12px;display:flex;flex-direction:column;gap:8px}
+.mono{font:12px "SF Mono",Menlo,monospace;background:#f5f5f7;border-radius:6px;padding:8px}
+.btns{display:flex;justify-content:flex-end;gap:8px}
+.btn{border-radius:6px;padding:4px 14px;background:#fff;box-shadow:0 0 0 .5px rgba(0,0,0,.25)}
+.btn.p{background:#007AFF;color:#fff}
+.lab{font-size:11px;font-weight:600;color:#8e8e93;padding:0 4px}
+</style></head><body><div class="panel">
+<div><div class="h">AgentBar</div><div class="s">1 needs you · 2 running</div></div>
+<div class="lab">Needs you</div>
+<div class="group req"><b>shop · Claude Code</b><div>Delete node_modules and reinstall dependencies</div><div class="mono">rm -rf node_modules &amp;&amp; npm install</div><div class="btns"><span class="btn">Deny</span><span class="btn p">Allow</span></div></div>
+<div class="lab">Running</div>
+<div class="group"><div class="row"><span class="dot" style="background:#007AFF;margin:0"></span><b>api-server</b><span>Ran npm test</span></div><div class="row"><span class="dot" style="background:#007AFF;margin:0"></span><b>blog draft</b><span>Writing</span></div></div>
+<div class="lab">Done today</div>
+<div class="group"><div class="row"><span class="dot" style="background:#34C759;margin:0"></span><b>docs</b><span>12m ago</span></div></div>
+</div></body></html>

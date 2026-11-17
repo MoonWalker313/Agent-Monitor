@@ -1,0 +1,28 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Standby, Go</title><style>
+*{box-sizing:border-box;margin:0}
+body{width:400px;height:680px;overflow:hidden;font:13px -apple-system,BlinkMacSystemFont,sans-serif;color:#F2F2F7;background:#0d0d0d}
+.panel{margin:8px;height:664px;border-radius:12px;background:#161616;box-shadow:0 0 0 .5px rgba(255,255,255,.15),0 12px 32px rgba(0,0,0,.5);padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.head{display:flex;justify-content:space-between;font-size:11px;color:#8e8e93}.head b{color:#F2F2F7;font-size:13px}
+.cue{display:flex;align-items:center;gap:10px;background:#2C2C2E;border-radius:8px;padding:9px 10px}
+.lamp{width:12px;height:12px;border-radius:6px;background:var(--c);box-shadow:0 0 10px var(--c)}
+.cue .tape{font:10px "SF Mono",Menlo,monospace;background:#3a3a3c;color:#d1d1d6;border-radius:2px;padding:2px 5px}
+.cue span:last-child{margin-left:auto;font-size:11px;color:#8e8e93}
+.sb{background:#1f1a10;border:1px solid #FFB020;flex-direction:column;align-items:stretch;gap:8px;padding:12px}
+.sbtop{display:flex;align-items:center;gap:10px}
+.sb h2{font-size:16px;font-weight:600}
+.mono{font:12px "SF Mono",Menlo,monospace;background:#0f0f0f;border-radius:6px;padding:9px;color:#ffd58a}
+.lab{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#a1a1a6}
+.btns{display:flex;gap:8px;justify-content:flex-end}
+.btn{border-radius:6px;padding:6px 18px;background:#3a3a3c}
+.go{background:#34C759;color:#05210d;font-weight:600}
+</style></head><body><div class="panel">
+<div class="head"><b>AgentBar</b><span>1 standing by · 2 running</span></div>
+<div class="cue sb" style="--c:#FFB020"><div class="sbtop"><span class="lamp"></span><span class="tape">CUE 1 · shop</span><span style="margin-left:auto;font-size:11px;color:#FFB020">Standing by · 1m</span></div>
+<h2>Delete node_modules and reinstall dependencies</h2>
+<div class="lab">Exact command</div><div class="mono">rm -rf node_modules &amp;&amp; npm install</div>
+<div class="lab">Before this</div><div style="font-size:12px;color:#d1d1d6">Read package.json · Edited package.json</div>
+<div class="btns"><span class="btn">Hold (Deny)</span><span class="btn go">Go (Allow)</span></div></div>
+<div class="cue" style="--c:#0A84FF"><span class="lamp"></span><span class="tape">CUE 2 · api-server</span><span>Running</span></div>
+<div class="cue" style="--c:#0A84FF"><span class="lamp"></span><span class="tape">CUE 3 · blog draft</span><span>Running</span></div>
+<div class="cue" style="--c:#34C759"><span class="lamp"></span><span class="tape">CUE 4 · docs</span><span>Complete</span></div>
+</div></body></html>

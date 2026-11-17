@@ -1,0 +1,3 @@
+2026-11-16T17:47:06Z | pending-review | surface=panel+popup | axis=direction | choice=Standby, Go (cue board) chosen by user over The Pass | open question: keep the amber standby card, or quieter?
+2026-11-16T17:59:47Z | kept | surface=panel | axis=motion | choice=clock-driven lamp glow + 30s coarse timestamps (no repeatForever, no per-second relative time) | reason=user confirmed panel no longer drifts
+2026-11-16T18:09:46Z | kept | surface=panel | axis=interaction | choice=click a cue row to expand its tasks (20, newest first, verb icons) + details; chevron affordance | reason=user confirmed it works

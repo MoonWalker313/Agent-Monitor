@@ -1,0 +1,7 @@
+.build/
+build/
+dist/
+.build-tools/
+.impeccable/review/
+*.xcodeproj
+.DS_Store
