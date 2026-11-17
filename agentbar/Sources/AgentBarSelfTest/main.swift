@@ -664,6 +664,74 @@ suite("status query") {
     checkThrows(SocketError.notRunning(dir + "/none.sock"), "status when not running") { _ = try StatusQuery.fetch(from: dir + "/none.sock") }
 }
 
+// MARK: - Security regressions
+
+suite("security: requests can't be swapped or hijacked") {
+    // A request without await_seconds never becomes an Allow/Deny card.
+    let noWait = try decode(#"{"agent":"a","session_id":"s","event":"needs_permission","request":{"id":"r","summary":"Run: ls","detail":"ls"}}"#)
+    check(noWait.event.request == nil && noWait.event.message == "Run: ls" && !noWait.warnings.isEmpty, "unawaited request shown as a message only")
+
+    // The engine keeps the first content for an open request id.
+    var engine = SessionEngine(config: EngineConfig(calendar: utc), now: t0)
+    engine.apply(AgentEvent(agent: "a", sessionID: "s", event: .needsPermission,
+                            request: PermissionRequestInfo(id: "r1", summary: "Run: delete everything", detail: "rm -rf ~")), now: at(0))
+    engine.apply(AgentEvent(agent: "a", sessionID: "s", event: .needsPermission,
+                            request: PermissionRequestInfo(id: "r1", summary: "Run: list files", detail: "ls")), now: at(1))
+    check(engine.sessions["a/s"]?.pendingRequest?.detail == "rm -rf ~", "same id can't rewrite what the card says")
+
+    let dir = tempDir()
+    defer { cleanup(dir) }
+    let path = dir + "/agentbar.sock"
+    let store = try EngineStore()
+    let server = SocketServer(path: path) { d in
+        let (_, s) = store.apply(d.event, at: d.date)
+        return ServerReply(ok: true, running: s.running, waiting: s.waiting)
+    }
+    try server.start()
+    defer { server.stop() }
+
+    final class Box: @unchecked Sendable { var reply: ServerReply?; let done = DispatchSemaphore(value: 0) }
+    let real = Box()
+    let realEvent = AgentEvent(agent: "a", sessionID: "s", event: .needsPermission,
+                               request: PermissionRequestInfo(id: "r1", tool: "Bash", summary: "Run: delete", detail: "rm -rf ~"),
+                               awaitSeconds: 20)
+    DispatchQueue.global().async {
+        real.reply = try? SocketClient.request(EventCodec.encodeLine(realEvent), to: path, timeout: 25); real.done.signal()
+    }
+    let info = SocketServer.AwaitInfo(sessionKey: "a/s", requestID: "r1")
+    for _ in 0..<200 where server.awaitingRequests.isEmpty { usleep(10_000) }
+
+    // A second connection claiming the same id is refused and can't change the card.
+    var impostor = realEvent
+    impostor.request = PermissionRequestInfo(id: "r1", tool: "Bash", summary: "Run: list files", detail: "ls")
+    let refused = try SocketClient.request(EventCodec.encodeLine(impostor), to: path, timeout: 3)
+    check(refused.ok == false, "second waiter for the same request id is refused")
+    check(store.snapshot().sessions["a/s"]?.pendingRequest?.detail == "rm -rf ~", "card still shows the real request")
+    check(server.awaitingRequests == [info], "the real agent is still the one waiting")
+
+    // Answering a different version of the request than the agent sent is refused.
+    let tampered = PermissionRequestInfo(id: "r1", tool: "Bash", summary: "Run: list files", detail: "ls")
+    check(!server.resolve(info, decision: .allow, shown: tampered), "resolve refuses when what was shown doesn't match")
+    check(server.resolve(info, decision: .deny, shown: realEvent.request), "resolve works for exactly what was shown")
+    real.done.wait()
+    check(real.reply?.decision == .deny, "the real agent got the user's answer")
+}
+
+suite("security: Claude settings keep permissions and symlinks") {
+    let dir = tempDir()
+    defer { cleanup(dir) }
+    let realFile = dir + "/dotfiles-settings.json"
+    let link = dir + "/settings.json"
+    try Data(#"{"env":{"ANTHROPIC_API_KEY":"secret"}}"#.utf8).write(to: URL(fileURLWithPath: realFile))
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: realFile)
+    try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: realFile)
+    try ClaudeSetup.connectFile(cli: "/Applications/AgentBar.app/Contents/Helpers/agentbar", path: link)
+    check((try? FileManager.default.destinationOfSymbolicLink(atPath: link)) == realFile, "symlink kept (dotfiles still linked)")
+    check(try ClaudeSetup.isConnected(ClaudeSetup.read(realFile)), "the linked file was updated")
+    check((try FileManager.default.attributesOfItem(atPath: realFile)[.posixPermissions] as? Int) == 0o600, "private file stays 0600")
+    check((try FileManager.default.attributesOfItem(atPath: link + ".agentbar-backup")[.posixPermissions] as? Int) == 0o600, "backup is private (0600)")
+}
+
 // MARK: - Load test (plan M1 exit criteria: 1,000 events/s across 50 sessions)
 
 suite("load: 1,000 events across 50 sessions through socket + engine + SQLite") {

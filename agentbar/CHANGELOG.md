@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1 (2026-11-17)
+
+Security fixes from a review of 1.0.0. Upgrading is recommended.
+
+- A permission card can no longer be changed after it appears, and only the agent that asked can receive your answer. Before, another process on your Mac could make a request show different text from what the waiting agent had asked for.
+- **Allow** ignores clicks for a moment after a request appears, so a popup can't slide under your pointer mid-click.
+- Connecting or disconnecting Claude Code now keeps `settings.json`'s file permissions (it can contain API keys), follows dotfile symlinks instead of replacing them, and keeps its backup private.
+- A permission request sent without waiting for an answer now shows as a plain message instead of an Allow/Deny card that couldn't reach the agent.
+
 ## 1.0.0 (2026-11-16)
 
 First release.

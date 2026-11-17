@@ -101,13 +101,15 @@ public final class SocketServer: @unchecked Sendable {
         var source: DispatchSourceRead?
         var awaiting: AwaitInfo?
         var awaitWarnings: [String] = []
+        /// The request as the waiting agent sent it; the user's answer must match it.
+        var awaitedRequest: PermissionRequestInfo?
         init(fd: Int32) { self.fd = fd }
     }
 
     private enum LineResult {
         case raw(Data)
         case reply(ServerReply)
-        case await(AwaitInfo, seconds: Int, warnings: [String])
+        case await(AwaitInfo, PermissionRequestInfo, seconds: Int, warnings: [String])
     }
 
     public init(path: String, rateLimiter: RateLimiter = RateLimiter(), handler: @escaping Handler) {
@@ -182,11 +184,15 @@ public final class SocketServer: @unchecked Sendable {
         unlink(path)
     }
 
-    /// Sends the user's answer to the waiting agent. Returns false if the agent is no longer waiting.
+    /// Sends the user's answer to the waiting agent. Returns false if the agent is no longer waiting,
+    /// or if `shown` (what the user saw) isn't exactly what that agent asked for.
     @discardableResult
-    public func resolve(_ info: AwaitInfo, decision: Decision, message: String? = nil) -> Bool {
+    public func resolve(_ info: AwaitInfo, decision: Decision, message: String? = nil,
+                        shown: PermissionRequestInfo? = nil) -> Bool {
         queue.sync {
-            guard let client = awaiting.removeValue(forKey: info) else { return false }
+            guard let client = awaiting[info] else { return false }
+            if let shown, client.awaitedRequest != shown { return false }
+            awaiting[info] = nil
             client.awaiting = nil
             let delivered = reply(ServerReply(ok: true, warnings: client.awaitWarnings.isEmpty ? nil : client.awaitWarnings,
                                               decision: decision, decisionMessage: message), to: client)
@@ -300,19 +306,19 @@ public final class SocketServer: @unchecked Sendable {
         case .reply(let r):
             _ = reply(r, to: client)
             return true
-        case .await(let info, let seconds, let warnings):
+        case .await(let info, let request, let seconds, let warnings):
             guard client.awaiting == nil else {
                 _ = reply(.failure("only one awaited request per connection"), to: client)
                 return true
             }
-            // A newer request for the same id replaces the old waiter.
-            if let previous = awaiting[info] {
-                previous.awaiting = nil
-                _ = reply(ServerReply(ok: true, decision: .deferred), to: previous)
-                drop(previous)
+            // The first agent waiting on a request id keeps it; a second connection can't take it over.
+            guard awaiting[info] == nil else {
+                _ = reply(.failure("a request with this id is already waiting"), to: client)
+                return true
             }
             awaiting[info] = client
             client.awaiting = info
+            client.awaitedRequest = request
             client.awaitWarnings = warnings
             queue.asyncAfter(deadline: .now() + .seconds(seconds)) { [weak self, weak client] in
                 guard let self, let client, self.awaiting[info] === client else { return }
@@ -338,10 +344,14 @@ public final class SocketServer: @unchecked Sendable {
                 _rateLimited += 1
                 return .reply(.failure(EventValidationError.rateLimited.description))
             }
+            if decoded.event.awaitSeconds != nil, let request = decoded.event.request,
+               awaiting[AwaitInfo(sessionKey: key, requestID: request.id)] != nil {
+                return .reply(.failure("a request with this id is already waiting"))
+            }
             var reply = handler(decoded)
             if !decoded.warnings.isEmpty { reply.warnings = (reply.warnings ?? []) + decoded.warnings }
             if reply.ok, let seconds = decoded.event.awaitSeconds, let request = decoded.event.request {
-                return .await(AwaitInfo(sessionKey: key, requestID: request.id), seconds: seconds, warnings: decoded.warnings)
+                return .await(AwaitInfo(sessionKey: key, requestID: request.id), request, seconds: seconds, warnings: decoded.warnings)
             }
             return .reply(reply)
         } catch let error as EventValidationError {

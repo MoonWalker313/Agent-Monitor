@@ -228,8 +228,15 @@ final class AppModel: ObservableObject {
     /// Allow / Deny / Answer-in-terminal from the panel, the popup, or a notification.
     func decide(sessionKey: String, requestID: String, decision: Decision) {
         let info = SocketServer.AwaitInfo(sessionKey: sessionKey, requestID: requestID)
+        // Answer only the request exactly as it was shown.
+        let shown = store.snapshot().sessions[sessionKey]?.pendingRequest
+        guard shown?.id == requestID else {
+            decisionNote = "That request is no longer open."
+            return
+        }
         let delivered = server?.resolve(info, decision: decision,
-                                        message: decision == .deny ? "The user denied this from AgentBar." : nil) ?? false
+                                        message: decision == .deny ? "The user denied this from AgentBar." : nil,
+                                        shown: shown) ?? false
         if delivered {
             store.resolveRequest(sessionKey: sessionKey, requestID: requestID, decision: decision)
             decisionNote = nil

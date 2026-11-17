@@ -13,7 +13,7 @@ jobs:
   release:
     runs-on: macos-latest   # current GitHub macOS image (Xcode included)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Check the tag matches VERSION
         run: |
           test "v$(tr -d '[:space:]' < VERSION)" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME doesn't match VERSION $(cat VERSION)"; exit 1; }

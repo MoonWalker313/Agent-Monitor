@@ -252,6 +252,14 @@ public enum EventCodec {
             }
         }
 
+        // A permission card only makes sense when the agent is waiting on this connection for
+        // the answer; otherwise Allow could never reach it. Keep its text as the status message.
+        if let request = event.request, event.awaitSeconds == nil {
+            event.request = nil
+            if event.message == nil { event.message = request.summary }
+            warnings.append("request shown as a message only: send await_seconds so AgentBar can deliver the answer")
+        }
+
         if let wait = event.awaitSeconds {
             if event.request == nil {
                 event.awaitSeconds = nil; warnings.append("await_seconds dropped: needs needs_permission with a request")

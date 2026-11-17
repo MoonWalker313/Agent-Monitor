@@ -13,6 +13,9 @@ struct CueCard: View {
 
     @State private var going = false
     @State private var copied = false
+    /// Allow is ignored for a moment after the card appears, so a click meant for something
+    /// else can't land on it as the popup slides in.
+    @State private var armed = Snapshot.directory != nil // screenshots skip the delay
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -29,6 +32,7 @@ struct CueCard: View {
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.standby))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.standbyEdge, lineWidth: 1))
+        .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { armed = true } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(Format.agentName(session.agent)) in \(Format.project(session)) is asking: \(headline)")
     }
@@ -124,7 +128,7 @@ struct CueCard: View {
                 Text("Allow").fontWeight(.semibold).frame(minWidth: 56)
             }
             .buttonStyle(GoButtonStyle())
-            .disabled(going)
+            .disabled(going || !armed)
             .help("Let the agent do exactly this, once.")
         }
     }

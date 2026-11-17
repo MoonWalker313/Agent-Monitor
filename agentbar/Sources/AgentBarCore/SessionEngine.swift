@@ -239,7 +239,9 @@ public struct SessionEngine: Sendable {
         }
         if let activity = event.activity { session.addActivity(activity, at: now) }
         if let request = event.request {
-            session.pendingRequest = request
+            // Never let a later event change what an open request says: the user must approve
+            // exactly what the waiting agent asked. A new id replaces the card; the same id doesn't.
+            if session.pendingRequest?.id != request.id { session.pendingRequest = request }
         } else if newState != .waiting {
             session.pendingRequest = nil
         }

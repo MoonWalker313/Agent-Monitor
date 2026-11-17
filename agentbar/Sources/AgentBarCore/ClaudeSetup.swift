@@ -100,15 +100,22 @@ public enum ClaudeSetup {
 
     /// Backs up the current file (`settings.json.agentbar-backup`), then writes atomically.
     public static func write(_ settings: [String: Any], to path: String = defaultPath) throws {
-        let url = URL(fileURLWithPath: path)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if FileManager.default.fileExists(atPath: path) {
+        let fm = FileManager.default
+        // Write through a symlink (dotfile managers) instead of replacing it with a plain file.
+        let target = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // settings.json can hold API keys (its "env" section): keep its permissions, default to private.
+        var mode = 0o600
+        if fm.fileExists(atPath: target.path) {
+            mode = (try? fm.attributesOfItem(atPath: target.path)[.posixPermissions] as? Int) ?? 0o600
             let backup = path + ".agentbar-backup"
-            try? FileManager.default.removeItem(atPath: backup)
-            try FileManager.default.copyItem(atPath: path, toPath: backup)
+            try? fm.removeItem(atPath: backup)
+            try fm.copyItem(atPath: target.path, toPath: backup)
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backup)
         }
         let data = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        try (data + Data("\n".utf8)).write(to: url, options: .atomic)
+        try (data + Data("\n".utf8)).write(to: target, options: .atomic)
+        try fm.setAttributes([.posixPermissions: mode], ofItemAtPath: target.path)
     }
 
     public static func connectFile(cli: String, path: String = defaultPath) throws {

@@ -15,8 +15,7 @@ enum Snapshot {
     static func prepareEnvironment() {
         guard directory != nil else { return }
         let home = NSTemporaryDirectory() + "agentbar-snapshot-\(getpid())"
-        setenv("AGENTBAR_HOME", home, 1)
-        setenv("AGENTBAR_SOCKET", "/tmp/agentbar-snap-\(getpid()).sock", 1)
+        setenv("AGENTBAR_HOME", home, 1) // socket and database live in this private temp folder
     }
 
     @MainActor
