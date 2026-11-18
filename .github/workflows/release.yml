@@ -1,9 +1,21 @@
 # Builds and publishes AgentBar when a version tag (v1.2.3) is pushed.
 # The tag must match the VERSION file. No Apple Developer account or secrets needed beyond GITHUB_TOKEN.
+# Can also be run by hand (Actions → Release → Run workflow) to build an existing tag again, for example
+# when GitHub's macOS runners were unavailable; it then replaces that release's files.
 name: Release
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build, e.g. v1.2.0"
+        required: true
+      runner:
+        description: "macOS runner (macos-latest is Apple silicon; macos-15-intel if those are busy)"
+        default: macos-latest
+        type: choice
+        options: [macos-latest, macos-15-intel]
 permissions:
   contents: write
 defaults:
@@ -11,12 +23,16 @@ defaults:
     working-directory: agentbar   # the app lives in agentbar/; docs (PRD, plan) sit at the repo root
 jobs:
   release:
-    runs-on: macos-latest   # current GitHub macOS image (Xcode included)
+    runs-on: ${{ inputs.runner || 'macos-latest' }}   # current GitHub macOS image (Xcode included)
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
       - name: Check the tag matches VERSION
         run: |
-          test "v$(tr -d '[:space:]' < VERSION)" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME doesn't match VERSION $(cat VERSION)"; exit 1; }
+          test "v$(tr -d '[:space:]' < VERSION)" = "$TAG" || { echo "Tag $TAG doesn't match VERSION $(cat VERSION)"; exit 1; }
       - name: Install dmgbuild
         run: python3 -m venv .build-tools && .build-tools/bin/pip install dmgbuild==1.6.2
       - name: Build, test and package (universal, ad-hoc signed)
@@ -29,5 +45,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/AgentBar-*.dmg dist/SHA256SUMS.txt \
-            --title "AgentBar ${GITHUB_REF_NAME#v}" --notes-file dist/notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # Rebuilding an existing release: replace its files and notes with this build's.
+            gh release upload "$TAG" dist/AgentBar-*.dmg dist/SHA256SUMS.txt --clobber
+            gh release edit "$TAG" --notes-file dist/notes.md
+          else
+            gh release create "$TAG" dist/AgentBar-*.dmg dist/SHA256SUMS.txt \
+              --title "AgentBar ${TAG#v}" --notes-file dist/notes.md
+          fi
